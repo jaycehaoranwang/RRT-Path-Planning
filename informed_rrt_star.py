@@ -14,21 +14,20 @@ class Node:
 
 class IRrtStar:
     def __init__(self, x_start, x_goal, step_len,
-                 goal_sample_rate, search_radius, map_size, iter_max=10000):
+                 goal_sample_rate, map_size, iter_max=10000, nearby_radius_factor=50):
         self.x_start = Node(x_start)
         self.x_goal = Node(x_goal)
         self.step_len = step_len
         self.goal_sample_rate = goal_sample_rate
-        self.search_radius = search_radius
         self.iter_max = iter_max
-
+        self.nearby_radius_factor = nearby_radius_factor
         self.fig, self.ax = plt.subplots()
         self.x_range = map_size[0]
         self.y_range = map_size[1]
 
         self.obstacles = []
         self.map_edge_clearance = 0.5
-        self.nearby_radius_factor = 50
+        
         self.obstacle_clearance = 3
         self.V = [self.x_start]
         self.X_soln = set()
@@ -343,8 +342,8 @@ def main():
     x_start = (2,30)  # Starting node
     x_goal = (58, 30)  # Goal node
 
-    informed_rrt_star = IRrtStar(x_start, x_goal, step_len=1.5,
-                        goal_sample_rate=0.1, search_radius=10, map_size=[[0,60],[0,60]], iter_max=10000)
+    informed_rrt_star = IRrtStar(x_start, x_goal, step_len=2,
+                        goal_sample_rate=0.15, nearby_radius_factor=50, map_size=[[0,60],[0,60]], iter_max=10000)
                  #1, 0.10, 12, 1000)
     informed_rrt_star.add_obstacles([(20,20),(30,30)])
     informed_rrt_star.add_obstacles([(30,40),(40,50)])
