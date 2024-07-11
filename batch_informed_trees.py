@@ -4,7 +4,8 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
-import ipdb 
+import time
+from dubins import plan_dubins_path
 
 class Node:
     def __init__(self, x, y):
@@ -28,26 +29,29 @@ class Tree:
 
 
 class BITStar:
-    def __init__(self, x_start, x_goal, map_size, search_radius=10, iter_max=500):
+    def __init__(self, x_start, x_goal, map_size, search_radius=10, iter_max=500, visualize=True, seed = None, dubins_paths = False):
         self.x_start = Node(x_start[0], x_start[1])
         self.x_goal = Node(x_goal[0], x_goal[1])
         self.iter_max = iter_max
-
+        self.dubins_paths = dubins_paths
         self.fig, self.ax = plt.subplots()
-
+        
         self.map_edge_clearance = 0.5
         self.obstacle_clearance = 3
         self.x_range = map_size[0]
         self.y_range = map_size[1]
-
+        self.visualize = visualize
         self.obstacles = []
         self.Tree = Tree(self.x_start, self.x_goal, search_radius)
         self.X_sample = set()
         self.g_T = dict()
-
+        self.seed = seed
     def init(self):
         self.Tree.V.add(self.x_start)
         self.X_sample.add(self.x_goal)
+
+        if self.seed:
+            random.seed(self.seed)
 
         self.g_T[self.x_start] = 0.0
         self.g_T[self.x_goal] = np.inf
@@ -61,16 +65,13 @@ class BITStar:
 
     def planning(self):
         theta, cMin, xCenter, C = self.init()
-
+        start = time.time()
         for k in range(self.iter_max):
             if not self.Tree.QE and not self.Tree.QV:
                 if k == 0:
-                    m = 350 # Sample count on first batch
+                    m = 200 # Sample count on first batch
                 else:
-                    m = 200 # Sample count on other batches
-
-                if self.x_goal.parent is not None:
-                    self.draw_graph(xCenter, self.g_T[self.x_goal] ,cMin, theta)
+                    m = 100 # Sample count on other batches
 
                 self.Prune(self.g_T[self.x_goal])
                 self.X_sample.update(self.Sample(m, self.g_T[self.x_goal], cMin, xCenter, C))
@@ -117,10 +118,19 @@ class BITStar:
             else:
                 self.Tree.QE = set()
                 self.Tree.QV = set()
-                print("Batch Complete")
-                self.draw_graph(xCenter, self.g_T[self.x_goal] ,cMin, theta)
-
+                if self.visualize:
+                    print("Batch Complete")
+                    print("Solution Cost From Dict:", self.g_T[self.x_goal])
+                    self.draw_graph(xCenter, self.g_T[self.x_goal] ,cMin, theta)
+            if self.g_T[self.x_goal] < 62:
+                end = time.time()
+                break
+        
         print("Planning Done")
+        print("Solution path cost:",self.g_T[self.x_goal])
+        print("Time Taken:",round(end-start,3))
+        self.draw_graph(xCenter, self.g_T[self.x_goal] ,cMin, theta)
+
         return True
 
     def draw_graph(self, x_center=None, c_best=None, dist=None, theta=None):
@@ -157,7 +167,7 @@ class BITStar:
         self.ax.set_xlim(self.x_range[0], self.x_range[1])
         self.ax.set_ylim(self.y_range[0], self.y_range[1])
         self.ax.grid(True)
-        plt.pause(0.01)
+        plt.pause(5)
 
     def add_obstacles(self,obstacle_coords):
         # obstacle_coords: [[x_min,y_min],[x_max,y_max]] corners of rectangular obstacle (ALL OBSTACLES ASSUMED TO BE RECTANGULAR)
@@ -233,7 +243,6 @@ class BITStar:
     def SampleFreeSpace(self, m):
         delta = self.map_edge_clearance
         Sample = set()
-
         ind = 0
         while ind < m:
             node = Node(random.uniform(self.x_range[0] + delta, self.x_range[1] - delta),
@@ -252,7 +261,53 @@ class BITStar:
                 return True 
         return False
 
+    def is_collision_dubins_path(self,path_x,path_y):
+        # Check for collision of dubin paths between nodes with obstacles, dubin paths are given as a series of (x,y) points 
+        # so collision checking only involves seeing if points reside within illegal bounds of the obstacles
+        def rectangle_intersection(rect1,rect2):
+            '''
+            Parameters:
+            - rect1: A tuple (xmin1, ymin1, xmax1, ymax1) representing the first rectangle.
+            - rect2: A tuple (xmin2, ymin2, xmax2, ymax2) representing the second rectangle
+            '''
+            xmin1, ymin1, xmax1, ymax1 = rect1[0][0], rect1[0][1], rect1[1][0], rect1[1][1]
+            xmin2, ymin2, xmax2, ymax2 = rect2[0][0], rect2[0][1], rect2[1][0], rect2[1][1]
+
+            # Check if one rectangle is to the left of the other
+            if xmax1 < xmin2 or xmax2 < xmin1:
+                return False
+            
+            # Check if one rectangle is above the other
+            if ymax1 < ymin2 or ymax2 < ymin1:
+                return False
+            
+            return True
+        
+        def dubins_point_intersection(points_x,points_y, obs_rect):
+            for x,y in zip(points_x,points_y):
+                if x >= obs_rect[0][0] and x <= obs_rect[1][0] and y >= obs_rect[0][1] and y <= obs_rect[1][1]:
+                    return True
+            return False
+        
+        #Check for bounding box collision of path with any obstacle first
+        min_x = min(path_x)
+        max_x = max(path_x)
+        min_y = min(path_y)
+        max_y = max(path_y)
+        path_box = [[min_x,min_y],[max_x,max_y]]
+        for obstacle in self.obstacles:
+            obs_x_min, obs_y_min = obstacle[0][0] - self.obstacle_clearance, obstacle[0][1] - self.obstacle_clearance
+            obs_x_max, obs_y_max = obstacle[1][0] + self.obstacle_clearance, obstacle[1][1] + self.obstacle_clearance
+            obstacle_rectangle = [[obs_x_min,obs_y_min],[obs_x_max,obs_y_max]]
+            if rectangle_intersection(path_box,obstacle_rectangle):
+                if dubins_point_intersection(path_x,path_y,obstacle_rectangle):
+                    return True
+
+        return False
+
+
     def is_collision(self,start,end):
+        # Check for collision of straight line paths between nodes with obstacles
 
         if self.inside_obstacle(start) or self.inside_obstacle(end):
             return True
@@ -429,14 +484,15 @@ class BITStar:
 
 def main():
     x_start = (2,30)  # Starting node
-    x_goal = (58, 30)  # Goal node
+    x_goal = (95, 30)  # Goal node
     
-    batch_informed_star = BITStar(x_start, x_goal, map_size=[[0,60],[0,60]], search_radius = 15, iter_max=100000)
+    batch_informed_star = BITStar(x_start, x_goal, map_size=[[0,100],[0,60]], search_radius = 20, iter_max=100000, visualize=True)
                  #1, 0.10, 12, 1000)
     batch_informed_star.add_obstacles([(20,20),(30,30)])
     batch_informed_star.add_obstacles([(30,40),(40,50)])
     batch_informed_star.add_obstacles([(40,30),(50,40)])
-    
+    #batch_informed_star.add_obstacles([(65,25),(75,35)])
+
     batch_informed_star.planning()
 
 
