@@ -14,11 +14,11 @@ class Node:
 
 
 class Tree:
-    def __init__(self, x_start, x_goal):
+    def __init__(self, x_start, x_goal, radius):
         self.x_start = x_start
         self.goal = x_goal
 
-        self.r = 10
+        self.r = radius
         self.V = set()
         self.E = set()
         self.QE = set()
@@ -28,10 +28,9 @@ class Tree:
 
 
 class BITStar:
-    def __init__(self, x_start, x_goal, map_size, eta=1, iter_max=500):
+    def __init__(self, x_start, x_goal, map_size, search_radius=10, iter_max=500):
         self.x_start = Node(x_start[0], x_start[1])
         self.x_goal = Node(x_goal[0], x_goal[1])
-        self.eta = eta
         self.iter_max = iter_max
 
         self.fig, self.ax = plt.subplots()
@@ -42,7 +41,7 @@ class BITStar:
         self.y_range = map_size[1]
 
         self.obstacles = []
-        self.Tree = Tree(self.x_start, self.x_goal)
+        self.Tree = Tree(self.x_start, self.x_goal, search_radius)
         self.X_sample = set()
         self.g_T = dict()
 
@@ -159,7 +158,7 @@ class BITStar:
             path_x, path_y, path_cost = self.ExtractPath()
             self.ax.plot(path_x, path_y, '-r')
             print("Solution Path Cost:", round(path_cost,3))
-            
+
         self.ax.plot(self.x_start.x, self.x_start.y, "xr")
         self.ax.plot(self.x_goal.x, self.x_goal.y, "xr")
         self.ax.set_xlim(self.x_range[0], self.x_range[1])
@@ -253,13 +252,6 @@ class BITStar:
                 ind += 1
 
         return Sample
-
-    def radius(self, q):
-        cBest = self.g_T[self.x_goal]
-        lambda_X = len([1 for v in self.Tree.V if self.f_estimated(v) <= cBest])
-        radius = 2 * self.eta * (1.5 * lambda_X / math.pi * math.log(q) / q) ** 0.5
-
-        return radius
     
     def inside_obstacle(self,node):
         for obstacle in self.obstacles:
@@ -446,7 +438,7 @@ def main():
     x_start = (2,30)  # Starting node
     x_goal = (58, 30)  # Goal node
     
-    batch_informed_star = BITStar(x_start, x_goal, map_size=[[0,60],[0,60]], eta=100, iter_max=100000)
+    batch_informed_star = BITStar(x_start, x_goal, map_size=[[0,60],[0,60]], search_radius = 15, iter_max=100000)
                  #1, 0.10, 12, 1000)
     batch_informed_star.add_obstacles([(20,20),(30,30)])
     batch_informed_star.add_obstacles([(30,40),(40,50)])
