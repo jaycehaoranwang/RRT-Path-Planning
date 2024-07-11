@@ -4,6 +4,8 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
+import time
+
 
 class Node:
     def __init__(self, n):
@@ -14,7 +16,7 @@ class Node:
 
 class IRrtStar:
     def __init__(self, x_start, x_goal, step_len,
-                 goal_sample_rate, map_size, iter_max=10000, nearby_radius_factor=50):
+                 goal_sample_rate, map_size, iter_max=10000, nearby_radius_factor=50, visualize = False, acceptable_solution_cost = None):
         self.x_start = Node(x_start)
         self.x_goal = Node(x_goal)
         self.step_len = step_len
@@ -27,8 +29,9 @@ class IRrtStar:
 
         self.obstacles = []
         self.map_edge_clearance = 0.5
-        
+        self.visualize = visualize
         self.obstacle_clearance = 3
+        self.acceptable_solution_cost = acceptable_solution_cost
         self.V = [self.x_start]
         self.X_soln = set()
         self.path = None
@@ -45,8 +48,8 @@ class IRrtStar:
         plt.ion()
 
         theta, dist, x_center, C, x_best = self.init()
-        c_best = np.inf
-
+        c_best = np.inf 
+        start = time.time()
         for k in range(self.iter_max):
             if self.X_soln:
                 cost = {node: self.Cost(node) for node in self.X_soln}
@@ -84,11 +87,22 @@ class IRrtStar:
                     if not self.is_collision(x_new, self.x_goal):
                         self.X_soln.add(x_new)
 
-            if k % 10 == 0:
+            if self.visualize and k % 10 == 0:
                 if self.X_soln:
                     self.path = self.ExtractPath(x_best)
                 self.draw_graph(x_center=x_center, c_best=c_best, dist=dist, theta=theta)
+            else:
+                if c_best < self.acceptable_solution_cost:
+                    break
+            if self.X_soln and self.visualize:
                 print("Best Path Cost:",c_best)
+        end = time.time()
+        if self.acceptable_solution_cost:
+            self.path = self.ExtractPath(x_best)
+            print("Final Best Path Cost:",c_best)
+            print(f"Finding this solution took: {round(end-start,2)} seconds")
+            self.draw_graph(x_center=x_center, c_best=c_best, dist=dist, theta=theta)
+            plt.pause(10)
         return True
 
 
@@ -141,16 +155,14 @@ class IRrtStar:
 
         return node_new
 
-    def Near(self, nodelist, node):
+    def Near(self, nodelist, anode):
         n = len(nodelist) + 1
         r = self.nearby_radius_factor * math.sqrt((math.log(n) / n))
-
-        dist_table = [(nd.x - node.x) ** 2 + (nd.y - node.y) ** 2 for nd in nodelist]
+        dist_table = [(nd.x - anode.x) ** 2 + (nd.y - anode.y) ** 2 for nd in nodelist]
         X_near = [nodelist[ind] for ind in range(len(dist_table)) if dist_table[ind] <= r ** 2 and
-                  not self.is_collision(nodelist[ind], node)]
-
+                  not self.is_collision(nodelist[ind], anode)]
         return X_near
-
+        
     def Sample(self, c_max, c_min, x_center, C):
         if c_max < np.inf:
             r = [c_max / 2.0,
@@ -172,6 +184,7 @@ class IRrtStar:
 
     @staticmethod
     def SampleUnitBall():
+        
         while True:
             x, y = random.uniform(-1, 1), random.uniform(-1, 1)
             if x ** 2 + y ** 2 < 1:
@@ -179,7 +192,7 @@ class IRrtStar:
 
     def SampleFreeSpace(self):
         delta = self.map_edge_clearance
-
+       
         if np.random.random() > self.goal_sample_rate:
             return Node((np.random.uniform(self.x_range[0] + delta, self.x_range[1] - delta),
                          np.random.uniform(self.y_range[0] + delta, self.y_range[1] - delta)))
@@ -216,8 +229,7 @@ class IRrtStar:
 
     @staticmethod
     def Nearest(nodelist, n):
-        return nodelist[int(np.argmin([(nd.x - n.x) ** 2 + (nd.y - n.y) ** 2
-                                       for nd in nodelist]))]
+        return nodelist[int(np.argmin([(nd.x - n.x) ** 2 + (nd.y - n.y) ** 2 for nd in nodelist]))]
 
     @staticmethod
     def Line(x_start, x_goal):
@@ -341,9 +353,10 @@ class IRrtStar:
 def main():
     x_start = (2,30)  # Starting node
     x_goal = (58, 30)  # Goal node
-
+    
     informed_rrt_star = IRrtStar(x_start, x_goal, step_len=2,
-                        goal_sample_rate=0.15, nearby_radius_factor=50, map_size=[[0,60],[0,60]], iter_max=10000)
+                        goal_sample_rate=0.15, nearby_radius_factor=50, map_size=[[0,60],[0,60]], iter_max=100000,
+                        acceptable_solution_cost=60, visualize=False)
                  #1, 0.10, 12, 1000)
     informed_rrt_star.add_obstacles([(20,20),(30,30)])
     informed_rrt_star.add_obstacles([(30,40),(40,50)])
@@ -351,6 +364,10 @@ def main():
     
     informed_rrt_star.planning()
 
+'''
+Instead of sampling with a heading, try to find a path first then assign headings of min cost to each node in solution that will produce a feasible unobstructed dubins trajectory
+folowing nodes in the produced solution path
 
+'''
 if __name__ == '__main__':
     main()

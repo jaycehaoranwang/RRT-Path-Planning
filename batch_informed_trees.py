@@ -65,9 +65,9 @@ class BITStar:
         for k in range(self.iter_max):
             if not self.Tree.QE and not self.Tree.QV:
                 if k == 0:
-                    m = 350
+                    m = 350 # Sample count on first batch
                 else:
-                    m = 200
+                    m = 200 # Sample count on other batches
 
                 if self.x_goal.parent is not None:
                     self.draw_graph(xCenter, self.g_T[self.x_goal] ,cMin, theta)
@@ -117,18 +117,11 @@ class BITStar:
             else:
                 self.Tree.QE = set()
                 self.Tree.QV = set()
-                print("Batch Complete, Solution Path Cost:",)
-
+                print("Batch Complete")
                 self.draw_graph(xCenter, self.g_T[self.x_goal] ,cMin, theta)
-            #if k % 5 == 0:
-                #self.animation(xCenter, self.g_T[self.x_goal], cMin, theta)
 
         print("Planning Done")
         return True
-        #plt.plot(path_x, path_y, linewidth=2, color='r')
-        #plt.pause(0.01)
-        #plt.show()
-
 
     def draw_graph(self, x_center=None, c_best=None, dist=None, theta=None):
         self.ax.clear()
