@@ -23,7 +23,8 @@ class BIT_Dubins_Planner
         Node m_goal;
         const std::vector<float>& m_discrete_headings {};  // Reference member variable
         Environment_Map& m_env_map;
-        KDTree_t m_kdtree {};
+        NodeKDTreeAdapter m_samples_kdAdapter;
+        NodeKDTreeAdapter m_vertex_kdAdapter;
         std::unordered_set<node_ptr_t, NPHash, NPNodeEqual> m_map_samples {};
         std::unordered_set<node_ptr_t, NPHash, NPNodeEqual> m_vertex_set {};
         std::unordered_set<node_ptr_t, NPHash, NPNodeEqual> m_vertex_set_old {};
@@ -31,7 +32,9 @@ class BIT_Dubins_Planner
         std::priority_queue<EdgeCost_t, std::vector<EdgeCost_t>, CompareQueuePairCosts> m_edge_queue {};
         std::priority_queue<VertexCost_t, std::vector<VertexCost_t>, CompareQueuePairCosts> m_vertex_queue {};
         std::unordered_map<node_ptr_t, float, NPHash, NPNodeEqual> m_cost_to_node_table {};
-        float m_search_radius {};
+        
+        const float m_search_radius {};
+        constexpr int m_max_kdtree_leafs = 10;
         const float m_cMin {};
         const float m_theta {};
         const float m_min_turning_radius {};
@@ -125,25 +128,34 @@ class BIT_Dubins_Planner
 
         }
 
-        void expand_vertex(const node_ptr_t& vertex_node)
+        void expand_vertex(const node_ptr_t& vertex_node, KDTree_t& samples_kdtree, KDTree_t& vertex_kdtree)
         {
             // Remove vertex from vertex priority queue, but if using priority queue vertex should be removed from queue already when retrieved
 
             //Find nodes near arg vertex_node
-            std::vector<nanoflann::ResultItem<uint32_t, num_t>> ret_matches;
-            // TODO: ARGUMENTS/TYPES NEED FIXING
-            const size_t nMatches = m_kdtree.radiusSearch(vertex_node, m_search_radius, ret_matches);
+            std::vector<nanoflann::ResultItem<float, float>> ret_matches;
+            const float query_pt[2] = {vertex_node->get_x(),vertex_node->get_y()}
+            const size_t nMatches = samples_kdtree.radiusSearch(&query_pt[0], m_search_radius, ret_matches);
+            std::unordered_set<node_ptr_t, NPHash, NPNodeEqual> samples_near;
+            
             // Prune samples in map_samples
             
         }
 
-        KDTree_t build_kdtree()
+        KDTree_t build_samples_kdtree()
         {
-            NodeKDTreeAdapter adapter;
-            adapter.nodes = m_map_samples;
-            KDTree_t kdtree(2 /* dimensions */, adapter, KDTreeSingleIndexAdaptorParams(10 /* max leaf */));
-            kdtree.buildIndex();
-            return kdtree
+            m_samples_kdAdapter.nodes = m_map_samples;
+            KDTree_t samples_kdtree(2 /* dimensions */, m_samples_kdAdapter, {m_max_kdtree_leafs /* Leaf nodes*/});
+            samples_kdtree.buildIndex();
+            return samples_kdtree
+        }
+
+        KDTree_t build_vertex_kdtree()
+        {
+            m_vertex_kdAdapter.nodes = m_vertex_set;
+            KDTree_t vertex_kdtree(2 /* dimensions */, m_vertex_kdAdapter, {m_max_kdtree_leafs /* Leaf nodes*/});
+            vertex_kdtree.buildIndex();
+            return vertex_kdtree
         }
 
     public:
@@ -167,7 +179,7 @@ class BIT_Dubins_Planner
             m_vertex_set.insert(m_shared_start_ptr);
             m_cost_to_node_table[m_shared_start_ptr] = 0.0f;
             m_cost_to_node_table[m_shared_goal_ptr] = std::numeric_limits<float>::infinity();
-            m_kdtree = build_kdtree();
+
         }
 
         std::vector<std::pair> plan()
