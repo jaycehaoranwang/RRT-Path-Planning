@@ -5,50 +5,57 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import time
-from dubins import plan_dubins_path
-
+from dubins import plan_dubins_path, plot_arrow
+import ipdb
 class Node:
-    def __init__(self, x, y):
+    def __init__(self, x, y, heading=0):
         self.x = x
         self.y = y
         self.parent = None
-
+        self.heading = heading
 
 class Tree:
     def __init__(self, x_start, x_goal, radius):
         self.x_start = x_start
         self.goal = x_goal
-
         self.r = radius
-        self.V = set()
-        self.E = set()
-        self.QE = set()
-        self.QV = set()
-
-        self.V_old = set()
+        # self.V = set()
+        # self.E = set()
+        # self.QE = set()
+        # self.QV = set()
+        # self.V_old = set()
+        self.V = []
+        self.E = []
+        self.QE = []
+        self.QV = []
+        self.V_old = []
 
 
 class BITStar:
-    def __init__(self, x_start, x_goal, map_size, search_radius=10, iter_max=500, visualize=True, seed = None, dubins_paths = False):
-        self.x_start = Node(x_start[0], x_start[1])
-        self.x_goal = Node(x_goal[0], x_goal[1])
+    def __init__(self, x_start, x_goal, map_size, search_radius=10, iter_max=500, visualize=True, seed = None, enable_dubins_paths = False, min_turning_radius = None):
+        self.x_start = Node(x_start[0], x_start[1], heading=0)
+        self.x_goal = Node(x_goal[0], x_goal[1], heading=0)
         self.iter_max = iter_max
-        self.dubins_paths = dubins_paths
+        self.enable_dubins_paths = enable_dubins_paths
         self.fig, self.ax = plt.subplots()
-        
+        self.discrete_acceptable_headings = [45,22.5,0,-22.5,-45]
         self.map_edge_clearance = 0.5
-        self.obstacle_clearance = 3
+        self.obstacle_clearance = 1
         self.x_range = map_size[0]
         self.y_range = map_size[1]
         self.visualize = visualize
         self.obstacles = []
         self.Tree = Tree(self.x_start, self.x_goal, search_radius)
-        self.X_sample = set()
+        #self.X_sample = set()
+        self.X_sample = []
         self.g_T = dict()
         self.seed = seed
+        self.min_turning_radius = min_turning_radius
+        self.curvature = 1/self.min_turning_radius
+        
     def init(self):
-        self.Tree.V.add(self.x_start)
-        self.X_sample.add(self.x_goal)
+        self.Tree.V.append(self.x_start)
+        self.X_sample.append(self.x_goal)
 
         if self.seed:
             random.seed(self.seed)
@@ -60,7 +67,7 @@ class BITStar:
         C = self.RotationToWorldFrame(self.x_start, self.x_goal, cMin)
         xCenter = np.array([[(self.x_start.x + self.x_goal.x) / 2.0],
                             [(self.x_start.y + self.x_goal.y) / 2.0], [0.0]])
-
+        
         return theta, cMin, xCenter, C
 
     def planning(self):
@@ -74,12 +81,11 @@ class BITStar:
                     m = 100 # Sample count on other batches
 
                 self.Prune(self.g_T[self.x_goal])
-                self.X_sample.update(self.Sample(m, self.g_T[self.x_goal], cMin, xCenter, C))
+                #self.X_sample.update(self.Sample(m, self.g_T[self.x_goal], cMin, xCenter, C))
+                self.X_sample.extend(self.Sample(m, self.g_T[self.x_goal], cMin, xCenter, C))
+                self.Tree.V_old = [v for v in self.Tree.V]
+                self.Tree.QV = [v for v in self.Tree.V]
                 
-                self.Tree.V_old = {v for v in self.Tree.V}
-                self.Tree.QV = {v for v in self.Tree.V}
-                #self.Tree.r = self.radius(len(self.Tree.V) + len(self.X_sample))
-                #print("Tree Radius:", self.Tree.r)
             while self.BestVertexQueueValue() <= self.BestEdgeQueueValue():
                 self.ExpandVertex(self.BestInVertexQueue())
 
@@ -92,82 +98,45 @@ class BITStar:
                     if self.g_T[vm] + actual_cost < self.g_T[xm]:
                         if xm in self.Tree.V:
                             # remove edges
-                            edge_delete = set()
+                            #edge_delete = set()
+                            edge_delete = []
                             for v, x in self.Tree.E:
                                 if x == xm:
-                                    edge_delete.add((v, x))
+                                    edge_delete.append((v, x))
 
                             for edge in edge_delete:
                                 self.Tree.E.remove(edge)
                         else:
                             self.X_sample.remove(xm)
-                            self.Tree.V.add(xm)
-                            self.Tree.QV.add(xm)
+                            self.Tree.V.append(xm)
+                            self.Tree.QV.append(xm)
 
                         self.g_T[xm] = self.g_T[vm] + actual_cost
-                        self.Tree.E.add((vm, xm))
+                        self.Tree.E.append((vm, xm))
                         xm.parent = vm
 
-                        set_delete = set()
+                        #set_delete = set()
+                        set_delete = []
                         for v, x in self.Tree.QE:
                             if x == xm and self.g_T[v] + self.calc_dist(v, xm) >= self.g_T[xm]:
-                                set_delete.add((v, x))
+                                set_delete.append((v, x))
 
                         for edge in set_delete:
                             self.Tree.QE.remove(edge)
             else:
-                self.Tree.QE = set()
-                self.Tree.QV = set()
+                #self.Tree.QE = set()
+                #self.Tree.QV = set()
+                self.Tree.QE = []
+                self.Tree.QV = []
                 if self.visualize:
                     print("Batch Complete")
-                    print("Solution Cost From Dict:", self.g_T[self.x_goal])
                     self.draw_graph(xCenter, self.g_T[self.x_goal] ,cMin, theta)
-            if self.g_T[self.x_goal] < 62:
-                end = time.time()
-                break
-        
+            
         print("Planning Done")
         print("Solution path cost:",self.g_T[self.x_goal])
-        print("Time Taken:",round(end-start,3))
         self.draw_graph(xCenter, self.g_T[self.x_goal] ,cMin, theta)
 
         return True
-
-    def draw_graph(self, x_center=None, c_best=None, dist=None, theta=None):
-        self.ax.clear()
-        # Plot obstacles
-        for obstacle in self.obstacles:
-            rect = plt.Rectangle((obstacle[0][0], obstacle[0][1]), obstacle[1][0] - obstacle[0][0], obstacle[1][1] - obstacle[0][1], color='black')
-            self.ax.add_patch(rect)
-        
-        #Plot Samples
-        for node in self.X_sample:
-            # Plot nodes
-            circle = plt.Circle((node.x, node.y), radius=0.3, color="b")
-            self.ax.add_patch(circle)
-        
-        #Plot the explored tree vertexes
-        for v in self.Tree.V:
-            circle = plt.Circle((v.x, v.y), radius=0.3, color="orange")
-            self.ax.add_patch(circle)
-        
-        #plot the explored tree edges
-        for e in self.Tree.E:
-            self.ax.plot([e[0].x, e[1].x], [e[0].y, e[1].y], linewidth=0.8, color="g")
-
-        #plot ellipse and current solution
-        if c_best != np.inf:
-            self.draw_ellipse(x_center, c_best, dist, theta)
-            path_x, path_y, path_cost = self.ExtractPath()
-            self.ax.plot(path_x, path_y, '-r')
-            print("Solution Path Cost:", round(path_cost,3))
-
-        self.ax.plot(self.x_start.x, self.x_start.y, "xr")
-        self.ax.plot(self.x_goal.x, self.x_goal.y, "xr")
-        self.ax.set_xlim(self.x_range[0], self.x_range[1])
-        self.ax.set_ylim(self.y_range[0], self.y_range[1])
-        self.ax.grid(True)
-        plt.pause(5)
 
     def add_obstacles(self,obstacle_coords):
         # obstacle_coords: [[x_min,y_min],[x_max,y_max]] corners of rectangular obstacle (ALL OBSTACLES ASSUMED TO BE RECTANGULAR)
@@ -186,20 +155,74 @@ class BITStar:
             path_y.append(node.y)
 
         return path_x, path_y, path_cost
+    
+    def ExtractDubinsPath(self):
+        path_cost = 0
+        node = self.x_goal
+        path_x, path_y = [node.x], [node.y]
+
+        while node.parent:
+            segment_x, segment_y, path_yaw, mode, lengths = plan_dubins_path(
+                                                            node.parent.x,
+                                                            node.parent.y,
+                                                            np.deg2rad(node.parent.heading),
+                                                            node.x,
+                                                            node.y,
+                                                            np.deg2rad(node.heading),
+                                                            self.curvature)
+            path_cost += sum(lengths)
+            node = node.parent
+            #insert segments at beginning of list
+            path_x[0:0] = segment_x 
+            path_y[0:0] = segment_y
+
+        return path_x, path_y, path_cost
 
     def Prune(self, cBest):
-        self.X_sample = {x for x in self.X_sample if self.f_estimated(x) < cBest}
-        self.Tree.V = {v for v in self.Tree.V if self.f_estimated(v) <= cBest}
-        self.Tree.E = {(v, w) for v, w in self.Tree.E
-                       if self.f_estimated(v) <= cBest and self.f_estimated(w) <= cBest}
-        self.X_sample.update({v for v in self.Tree.V if self.g_T[v] == np.inf})
-        self.Tree.V = {v for v in self.Tree.V if self.g_T[v] < np.inf}
+        # self.X_sample = {x for x in self.X_sample if self.f_estimated(x) < cBest}
+        # self.Tree.V = {v for v in self.Tree.V if self.f_estimated(v) <= cBest}
+        # self.Tree.E = {(v, w) for v, w in self.Tree.E
+        #                if self.f_estimated(v) <= cBest and self.f_estimated(w) <= cBest}
+        # self.X_sample.update({v for v in self.Tree.V if self.g_T[v] == np.inf})
+        # self.Tree.V = {v for v in self.Tree.V if self.g_T[v] < np.inf}
+        self.X_sample = [x for x in self.X_sample if self.f_estimated(x) < cBest]
+        self.Tree.V = [v for v in self.Tree.V if self.f_estimated(v) <= cBest]
+        self.Tree.E = [(v, w) for v, w in self.Tree.E
+                       if self.f_estimated(v) <= cBest and self.f_estimated(w) <= cBest]
+        self.X_sample.extend([v for v in self.Tree.V if self.g_T[v] == np.inf])
+        self.Tree.V = [v for v in self.Tree.V if self.g_T[v] < np.inf]
 
     def cost(self, start, end):
-        if self.is_collision(start, end):
-            return np.inf
+        if not self.enable_dubins_paths:
+            if self.is_collision(start, end):
+                return np.inf
+            else:
+                return self.calc_dist(start, end)
+        else:
+            #assess viable dubins paths according to acceptable end headings and pick the best one in terms of cost
+            path_and_costs = []
+            for yaw in self.discrete_acceptable_headings:
+                path_x, path_y, path_yaw, mode, lengths = plan_dubins_path(
+                                                            start.x,
+                                                            start.y,
+                                                            np.deg2rad(start.heading),
+                                                            end.x,
+                                                            end.y,
+                                                            np.deg2rad(yaw),
+                                                            self.curvature)
+                path_and_costs.append([[path_x, path_y],sum(lengths),yaw])
 
-        return self.calc_dist(start, end)
+            path_and_costs.sort(key=lambda x: x[1])
+            # Check for collisions in min cost dubin paths, if none, return the cost and set the heading
+            for p in path_and_costs:
+                # If the min path has a collision, goto the next min path
+                if self.is_collision_dubins_path(p[0][0], p[0][1]):
+                    continue
+                #If there is no collision, then this path is viable
+                end.heading = p[-1] #Set the end node's heading
+                return p[1]
+
+            return np.inf #If ALL paths have collisions, these nodes are not able to be connected
 
     def f_estimated(self, node):
         return self.g_estimated(node) + self.h_estimated(node)
@@ -224,8 +247,8 @@ class BITStar:
 
         ind = 0
         delta = self.map_edge_clearance
-        Sample = set()
-
+        #Sample = set()
+        Sample = []
         while ind < m:
             xBall = self.SampleUnitNBall()
             x_rand = np.dot(np.dot(C, L), xBall) + xCenter
@@ -235,14 +258,15 @@ class BITStar:
             in_y_range = self.y_range[0] + delta <= node.y <= self.y_range[1] - delta
 
             if not in_obs and in_x_range and in_y_range:
-                Sample.add(node)
+                Sample.append(node)
                 ind += 1
 
         return Sample
 
     def SampleFreeSpace(self, m):
         delta = self.map_edge_clearance
-        Sample = set()
+        #Sample = set()
+        Sample = []
         ind = 0
         while ind < m:
             node = Node(random.uniform(self.x_range[0] + delta, self.x_range[1] - delta),
@@ -250,7 +274,7 @@ class BITStar:
             if self.inside_obstacle(node):
                 continue
             else:
-                Sample.add(node)
+                Sample.append(node)
                 ind += 1
 
         return Sample
@@ -261,6 +285,16 @@ class BITStar:
                 return True 
         return False
 
+    def dubins_point_intersection(self, points_x,points_y, obs_rect):
+            for x,y in zip(points_x,points_y):
+                if x >= obs_rect[0][0] and x <= obs_rect[1][0] and y >= obs_rect[0][1] and y <= obs_rect[1][1]:
+                    return True
+                #Check for paths out of bounds
+                if x <= self.x_range[0] + self.map_edge_clearance or x >= self.x_range[1] - self.map_edge_clearance or y <= self.y_range[0] + self.map_edge_clearance or y >= self.y_range[1] - self.map_edge_clearance:
+                    return True
+            return False
+    
+    
     def is_collision_dubins_path(self,path_x,path_y):
         # Check for collision of dubin paths between nodes with obstacles, dubin paths are given as a series of (x,y) points 
         # so collision checking only involves seeing if points reside within illegal bounds of the obstacles
@@ -280,15 +314,8 @@ class BITStar:
             # Check if one rectangle is above the other
             if ymax1 < ymin2 or ymax2 < ymin1:
                 return False
-            
+        
             return True
-        
-        def dubins_point_intersection(points_x,points_y, obs_rect):
-            for x,y in zip(points_x,points_y):
-                if x >= obs_rect[0][0] and x <= obs_rect[1][0] and y >= obs_rect[0][1] and y <= obs_rect[1][1]:
-                    return True
-            return False
-        
         #Check for bounding box collision of path with any obstacle first
         min_x = min(path_x)
         max_x = max(path_x)
@@ -300,7 +327,7 @@ class BITStar:
             obs_x_max, obs_y_max = obstacle[1][0] + self.obstacle_clearance, obstacle[1][1] + self.obstacle_clearance
             obstacle_rectangle = [[obs_x_min,obs_y_min],[obs_x_max,obs_y_max]]
             if rectangle_intersection(path_box,obstacle_rectangle):
-                if dubins_point_intersection(path_x,path_y,obstacle_rectangle):
+                if self.dubins_point_intersection(path_x,path_y,obstacle_rectangle):
                     return True
 
         return False
@@ -337,20 +364,21 @@ class BITStar:
     
     def ExpandVertex(self, v):
         self.Tree.QV.remove(v)
-        X_near = {x for x in self.X_sample if self.calc_dist(x, v) <= self.Tree.r}
+        #X_near = {x for x in self.X_sample if self.calc_dist(x, v) <= self.Tree.r}
+        X_near = [x for x in self.X_sample if self.calc_dist(x, v) <= self.Tree.r]
         for x in X_near:
             if self.g_estimated(v) + self.calc_dist(v, x) + self.h_estimated(x) < self.g_T[self.x_goal]:
                 self.g_T[x] = np.inf
-                self.Tree.QE.add((v, x))
+                self.Tree.QE.append((v, x))
 
         if v not in self.Tree.V_old:
-            V_near = {w for w in self.Tree.V if self.calc_dist(w, v) <= self.Tree.r}
+            V_near = [w for w in self.Tree.V if self.calc_dist(w, v) <= self.Tree.r]
 
             for w in V_near:
                 if (v, w) not in self.Tree.E and \
                         self.g_estimated(v) + self.calc_dist(v, w) + self.h_estimated(w) < self.g_T[self.x_goal] and \
                         self.g_T[v] + self.calc_dist(v, w) < self.g_T[w]:
-                    self.Tree.QE.add((v, w))
+                    self.Tree.QE.append((v, w))
                     if w not in self.g_T:
                         self.g_T[w] = np.inf
 
@@ -372,8 +400,8 @@ class BITStar:
             print("QV is Empty!")
             return None
 
+        #v_value = {v: self.g_T[v] + self.h_estimated(v) for v in self.Tree.QV}
         v_value = {v: self.g_T[v] + self.h_estimated(v) for v in self.Tree.QV}
-
         return min(v_value, key=v_value.get)
 
     def BestInEdgeQueue(self):
@@ -482,17 +510,67 @@ class BITStar:
             # If none of the cases apply, the segments do not intersect
             return False
 
-def main():
-    x_start = (2,30)  # Starting node
-    x_goal = (95, 30)  # Goal node
-    
-    batch_informed_star = BITStar(x_start, x_goal, map_size=[[0,100],[0,60]], search_radius = 20, iter_max=100000, visualize=True)
-                 #1, 0.10, 12, 1000)
-    batch_informed_star.add_obstacles([(20,20),(30,30)])
-    batch_informed_star.add_obstacles([(30,40),(40,50)])
-    batch_informed_star.add_obstacles([(40,30),(50,40)])
-    #batch_informed_star.add_obstacles([(65,25),(75,35)])
+    def draw_graph(self, x_center=None, c_best=None, dist=None, theta=None):
+        self.ax.clear()
+        # Plot obstacles
+        for obstacle in self.obstacles:
+            rect = plt.Rectangle((obstacle[0][0], obstacle[0][1]), obstacle[1][0] - obstacle[0][0], obstacle[1][1] - obstacle[0][1], color='black')
+            self.ax.add_patch(rect)
+        
+        #Plot Samples
+        for node in self.X_sample:
+            # Plot nodes
+            circle = plt.Circle((node.x, node.y), radius=0.2, color="b")
+            self.ax.add_patch(circle)
+        
+        #Plot the explored tree vertexes
+        for v in self.Tree.V:
+            circle = plt.Circle((v.x, v.y), radius=0.2, color="orange")
+            self.ax.add_patch(circle)
+            #ipdb.set_trace()
+            plot_arrow(v.x, v.y, np.deg2rad(v.heading), arrow_length=1, ax=self.ax, origin_point_plot_style=None)
 
+        #plot the explored tree edges
+        # for e in self.Tree.E:
+        #     if not self.enable_dubins_paths:
+        #         self.ax.plot([e[0].x, e[1].x], [e[0].y, e[1].y], linewidth=0.5,alpha=0.8, color="g")
+        #     else:
+        #         path_x, path_y, path_yaw, mode, lengths = plan_dubins_path(
+        #                                                     e[0].x,
+        #                                                     e[0].y,
+        #                                                     np.deg2rad(e[0].heading),
+        #                                                     e[1].x,
+        #                                                     e[1].y,
+        #                                                     np.deg2rad(e[1].heading),
+        #                                                     self.curvature)
+        #         self.ax.plot(path_x, path_y,linewidth=0.5,alpha=0.8, color="g")
+
+        #plot ellipse and current solution
+        if c_best != np.inf:
+            self.draw_ellipse(x_center, c_best, dist, theta)
+            if self.enable_dubins_paths:
+                path_x, path_y, path_cost = self.ExtractDubinsPath()
+            else:
+                path_x, path_y, path_cost = self.ExtractPath()
+            self.ax.plot(path_x, path_y, '-r')
+            print("Solution Path Cost:", round(path_cost,3))
+
+        self.ax.plot(self.x_start.x, self.x_start.y, "xr")
+        self.ax.plot(self.x_goal.x, self.x_goal.y, "xr")
+        self.ax.set_xlim(self.x_range[0], self.x_range[1])
+        self.ax.set_ylim(self.y_range[0], self.y_range[1])
+        self.ax.grid(True)
+        plt.pause(0.1)
+
+def main():
+    x_start = (2,15)  # Starting node
+    x_goal = (45, 15)  # Goal node
+    
+    batch_informed_star = BITStar(x_start, x_goal, map_size=[[0,50],[0,30]], search_radius = 20, iter_max=100000, visualize=True, enable_dubins_paths=True, min_turning_radius=10)
+    batch_informed_star.add_obstacles([(10,10),(15,15)])
+    batch_informed_star.add_obstacles([(15,20),(20,25)])
+    batch_informed_star.add_obstacles([(20,15),(25,20)])
+    
     batch_informed_star.planning()
 
 
