@@ -1,5 +1,4 @@
-import sys
-import pathlib
+
 import math
 from math import sin, cos, atan2, sqrt, acos, pi, hypot
 import numpy as np
@@ -7,7 +6,7 @@ from scipy.spatial.transform import Rotation as Rot
 import matplotlib.pyplot as plt
 import time
 import ipdb
-def plot_arrow(x, y, yaw, arrow_length=1.0,
+def plot_arrow(x, y, yaw, arrow_length=1.0, ax=None,
                origin_point_plot_style="xr",
                head_width=0.1, fc="r", ec="k", **kwargs):
     """
@@ -36,19 +35,25 @@ def plot_arrow(x, y, yaw, arrow_length=1.0,
     ec : string (optional)
         edge color
     """
-    if not isinstance(x, float):
-        for (i_x, i_y, i_yaw) in zip(x, y, yaw):
-            plot_arrow(i_x, i_y, i_yaw, head_width=head_width,
-                       fc=fc, ec=ec, **kwargs)
-    else:
+
+    if ax is None:
         plt.arrow(x, y,
-                  arrow_length * math.cos(yaw),
-                  arrow_length * math.sin(yaw),
-                  head_width=head_width,
-                  fc=fc, ec=ec,
-                  **kwargs)
+                arrow_length * math.cos(yaw),
+                arrow_length * math.sin(yaw),
+                head_width=head_width,
+                fc=fc, ec=ec,
+                **kwargs)
         if origin_point_plot_style is not None:
             plt.plot(x, y, origin_point_plot_style)
+    else:
+        ax.arrow(x, y,
+                arrow_length * math.cos(yaw),
+                arrow_length * math.sin(yaw),
+                head_width=head_width,
+                fc=fc, ec=ec,
+                **kwargs)
+        if origin_point_plot_style is not None:
+            ax.plot(x, y, origin_point_plot_style)
 
 
 def rot_mat_2d(angle):
@@ -130,7 +135,6 @@ def angle_mod(x, zero_2_2pi=False, degree=False):
     else:
         return mod_angle
     
-show_animation = True
 
 
 def plan_dubins_path(s_x, s_y, s_yaw, g_x, g_y, g_yaw, curvature,
@@ -411,70 +415,70 @@ def compute_trajectory_length(path_x, path_y):
 
 def main():
     print("Dubins path planner sample start!!")
+    show_animation = True
+    # start_x = 1.0  # [m]
+    # start_y = 1.0  # [m]
+    # start_yaw = np.deg2rad(45.0)  # [rad]
 
-    start_x = 1.0  # [m]
-    start_y = 1.0  # [m]
-    start_yaw = np.deg2rad(45.0)  # [rad]
+    # end_x = -3.0  # [m]
+    # end_y = -3.0  # [m]
+    # end_yaw = np.deg2rad(-45.0)  # [rad]
 
-    end_x = -3.0  # [m]
-    end_y = -3.0  # [m]
-    end_yaw = np.deg2rad(-45.0)  # [rad]
-
-    curvature = 1.0
-    start = time.time()
-    path_x, path_y, path_yaw, mode, lengths = plan_dubins_path(start_x,
-                                                               start_y,
-                                                               start_yaw,
-                                                               end_x,
-                                                               end_y,
-                                                               end_yaw,
-                                                               curvature)
-    print("Path 1 took:",time.time()-start)
-    print(f"Path 1's Length: {compute_trajectory_length(path_x, path_y)}, from returned lengths: {sum(lengths)}")
-    if show_animation:
-        plt.plot(path_x, path_y, label="".join(mode))
-        plot_arrow(start_x, start_y, start_yaw)
-        plot_arrow(end_x, end_y, end_yaw)
-        plt.legend()
-        plt.grid(True)
-        plt.axis("equal")
+    # curvature = 1.0
+    # start = time.time()
+    # path_x, path_y, path_yaw, mode, lengths = plan_dubins_path(start_x,
+    #                                                            start_y,
+    #                                                            start_yaw,
+    #                                                            end_x,
+    #                                                            end_y,
+    #                                                            end_yaw,
+    #                                                            curvature)
+    # print("Path 1 took:",time.time()-start)
+    # print(f"Path 1's Length: {compute_trajectory_length(path_x, path_y)}, from returned lengths: {sum(lengths)}")
+    # if show_animation:
+    #     plt.plot(path_x, path_y, label="".join(mode))
+    #     plot_arrow(start_x, start_y, start_yaw)
+    #     plot_arrow(end_x, end_y, end_yaw)
+    #     plt.legend()
+    #     plt.grid(True)
+    #     plt.axis("equal")
     
-    start_x = 3.0  # [m]
-    start_y = 3.0  # [m]
+    # start_x = 3.0  # [m]
+    # start_y = 3.0  # [m]
+    # start_yaw = np.deg2rad(0)  # [rad]
+
+    # end_x = -5.0  # [m]
+    # end_y = -5.0  # [m]
+    # end_yaw = np.deg2rad(-45.0)  # [rad]
+
+    # curvature = 1.0
+    # start = time.time()
+    # path_x, path_y, path_yaw, mode, lengths = plan_dubins_path(start_x,
+    #                                                            start_y,
+    #                                                            start_yaw,
+    #                                                            end_x,
+    #                                                            end_y,
+    #                                                            end_yaw,
+    #                                                            curvature)
+    # print("Path 2 took:",time.time()-start)
+    # print(f"Path 2's Length: {compute_trajectory_length(path_x, path_y)}, from returned lengths: {sum(lengths)}")
+    # if show_animation:
+    #     plt.plot(path_x, path_y, label="".join(mode))
+    #     plot_arrow(start_x, start_y, start_yaw)
+    #     plot_arrow(end_x, end_y, end_yaw)
+    #     plt.legend()
+    #     plt.grid(True)
+    #     plt.axis("equal")
+
+    start_x = 2  # [m]
+    start_y = 15  # [m]
     start_yaw = np.deg2rad(0)  # [rad]
 
-    end_x = -5.0  # [m]
-    end_y = -5.0  # [m]
-    end_yaw = np.deg2rad(-45.0)  # [rad]
+    end_x = 45  # [m]
+    end_y = 15  # [m]
+    end_yaw = np.deg2rad(-15)  # [rad]
 
-    curvature = 1.0
-    start = time.time()
-    path_x, path_y, path_yaw, mode, lengths = plan_dubins_path(start_x,
-                                                               start_y,
-                                                               start_yaw,
-                                                               end_x,
-                                                               end_y,
-                                                               end_yaw,
-                                                               curvature)
-    print("Path 2 took:",time.time()-start)
-    print(f"Path 2's Length: {compute_trajectory_length(path_x, path_y)}, from returned lengths: {sum(lengths)}")
-    if show_animation:
-        plt.plot(path_x, path_y, label="".join(mode))
-        plot_arrow(start_x, start_y, start_yaw)
-        plot_arrow(end_x, end_y, end_yaw)
-        plt.legend()
-        plt.grid(True)
-        plt.axis("equal")
-
-    start_x = 0.0  # [m]
-    start_y = 0.0  # [m]
-    start_yaw = np.deg2rad(-15)  # [rad]
-
-    end_x = -3.0  # [m]
-    end_y = -3.0  # [m]
-    end_yaw = np.deg2rad(0)  # [rad]
-
-    curvature = 1.0
+    curvature = 0.1
     start = time.time()
     path_x, path_y, path_yaw, mode, lengths = plan_dubins_path(start_x,
                                                                start_y,
@@ -486,7 +490,7 @@ def main():
     print("Path 3 took:",time.time()-start)
     print(f"Path 3's Length: {compute_trajectory_length(path_x, path_y)}, from returned lengths: {sum(lengths)}")
     if show_animation:
-        plt.plot(path_x, path_y, label="".join(mode))
+        plt.plot(path_x, path_y,'-r', label="".join(mode))
         plot_arrow(start_x, start_y, start_yaw)
         plot_arrow(end_x, end_y, end_yaw)
         plt.legend()
