@@ -132,4 +132,41 @@ typedef nanoflann::KDTreeSingleIndexAdaptor<
     > KDTree_t;
 
 
+template <typename T>
+class IndexableSet {
+public:
+    bool insert(const T& value) {
+        if (set.find(value) != set.end()) {
+            return false; // Value already exists
+        }
+        set.insert(value);
+        vec.push_back(value);
+        return true;
+    }
+
+    bool erase(const T& value) {
+        auto it = set.find(value);
+        if (it == set.end()) {
+            return false; // Value not found
+        }
+        set.erase(it);
+        vec.erase(std::remove(vec.begin(), vec.end(), value), vec.end());
+        return true;
+    }
+
+    const T& at(std::size_t index) const {
+        if (index >= vec.size()) {
+            throw std::out_of_range("Index out of range");
+        }
+        return vec.at(index);
+    }
+
+    std::size_t size() const {
+        return vec.size();
+    }
+
+private:
+    std::vector<T> vec;
+    std::unordered_set<T> set;
+};
 

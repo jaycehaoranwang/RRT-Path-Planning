@@ -4,6 +4,9 @@
 #include <memory>
 #include <random>
 #include <format>
+#include <vector>
+#include <unordered_set>
+#include <stdexcept>
 
 typedef std::shared_ptr<Node> node_ptr_t;
 
@@ -26,7 +29,8 @@ int main()
     std::uniform_real_distribution<float> dis(0.0f, 50.0f);
     std::uniform_real_distribution<float> dis_heading(0.0f, 360.0f);
 
-    std::shared_ptr<Node> node_ptr = std::make_shared<Node>(0.0f, 0.0f);
+    std::shared_ptr<Node> node_ptr;
+    node_ptr = std::make_shared<Node>(0.0f, 0.0f);
     node_ptr->set_heading(0.0f);
     m_map_samples.insert(node_ptr);
     std::string formattedString = std::format("X: {} , Y: {} , Heading: {}", 0.0f, 0.0f, 0.0f);
@@ -69,7 +73,7 @@ int main()
     const float search_radius = 100.0f;
     std::cout <<  std::format("Query Point X: {}, Y: {}", query_pt[0], query_pt[1]) << std::endl;
     std::vector<nanoflann::ResultItem<float, float>> ret_matches;
-
+    std::vector<node_ptr_t> samples_vec(m_map_samples.begin(), m_map_samples.end());
     const size_t nMatches = kdtree.radiusSearch(&query_pt[0], search_radius, ret_matches);
 
         std::cout << "radiusSearch(): radius=" << search_radius << " -> " << nMatches
@@ -79,5 +83,9 @@ int main()
                  << "]=" << ret_matches[i].second <<  std::endl;
          std::cout << "\n";
 
+    std::cout << "Retrieving Matched points from Vector list" << std::endl;
+    for (size_t i = 0; i < nMatches; i++)
+             std::cout << "Index in vector: " << ret_matches[i].first << "node info X: " << samples_vec[ret_matches[i].first]->get_x() << "Y: " << samples_vec[ret_matches[i].first]->get_y() << std::endl;
+         std::cout << "\n";
     return 0;
 }

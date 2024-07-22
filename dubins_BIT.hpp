@@ -1,5 +1,5 @@
-#ifndef DUBINS_BIT_PLANNER_HEADER
-#define DUBINS_BIT_PLANNER_HEADER
+#ifndef BIT_PLANNER_HEADER
+#define BIT_PLANNER_HEADER
 #include "nanoflann.hpp"
 #include <array>
 #include <tuple>
@@ -13,17 +13,17 @@
 #include <limits>
 #include <cmath>
 
-
+constexpr float PI = 3.14159265358979323846f;
 
 class Environment_Map
 {
     private:
-        const std::pair<int,int> m_x_range {};
-        const std::pair<int,int> m_y_range {};
+        const std::pair<float,float> m_x_range {};
+        const std::pair<float,float> m_y_range {};
         std::vector<std::array<float,4>> m_obstacles {};
 
     public:
-        Environment_Map(const std::pair<int,int> x_range, const std::pair<int,int> y_range)
+        Environment_Map(const std::pair<float,float> x_range, const std::pair<float,float> y_range)
             : m_x_range {x_range}, m_y_range {y_range}
         {
         }
@@ -37,9 +37,28 @@ class Environment_Map
         {
             return m_obstacles;
         }
+        
+        std::pair<float,float> get_xRange() const
+        {
+            return m_x_range;
+        }
 
+        std::pair<float,float> get_yRange() const
+        {
+            return m_y_range;
+        }
+
+        bool point_collision(std::shared_ptr<Node>& node_ptr)
+        {
+            /*
+            Check if a node/point is feasible to exist in the given map, ensure it is within map bounds+clearances, not inside obstacles or within obs clearance bounds
+            */
+        }
         bool path_collision() const
         {
+            /*
+            Check if a path collides with any obstacles and their safety bounds/other collision conditions
+            */
         }
 };
 
@@ -106,10 +125,10 @@ class Node
 };
 
 typedef std::shared_ptr<Node> node_ptr_t;
-typedef std::pair<node_ptr_t, node_ptr_t> node_ptr_pair_t
+typedef std::pair<node_ptr_t, node_ptr_t> node_ptr_pair_t;
 typedef std::pair<node_ptr_pair_t,float> EdgeCost_t;
 typedef std::pair<node_ptr_t,float> VertexCost_t;
-
+constexpr float inf = std::numeric_limits<float>::infinity();
 
 
 
@@ -161,7 +180,7 @@ struct PairNPEqual {
     }
 };
 
-// KD-tree adapter for Node
+// nanoflann KD-tree adapter for Node
 struct NodeKDTreeAdapter
 {
     std::unordered_set<node_ptr_t, NPHash, NPNodeEqual> nodes; // Vector of shared_ptr<Node>
