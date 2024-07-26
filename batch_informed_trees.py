@@ -71,6 +71,7 @@ class BITStar:
         theta, cMin, xCenter, C = self.init()
         start = time.time()
         for k in range(self.iter_max):
+            no_solution = False
             if not self.Tree.QE and not self.Tree.QV:
                 if k == 0:
                     m = 200 # Sample count on first batch
@@ -83,7 +84,18 @@ class BITStar:
                 self.Tree.QV = {v for v in self.Tree.V}
                 
             while self.BestVertexQueueValue() <= self.BestEdgeQueueValue():
-                self.ExpandVertex(self.BestInVertexQueue())
+                v = self.BestInVertexQueue()
+                if v is None:
+                    no_solution = True
+                    break
+                else:
+                    self.ExpandVertex(v)
+
+            if no_solution:
+                print("No Solution Found, going to Next batch")
+                self.Tree.QE = set()
+                self.Tree.QV = set()
+                continue
 
             vm, xm = self.BestInEdgeQueue()
             self.Tree.QE.remove((vm, xm))
@@ -557,7 +569,7 @@ def main():
     x_start = (2,15)  # Starting node
     x_goal = (45, 15)  # Goal node
     
-    batch_informed_star = BITStar(x_start, x_goal, map_size=[[0,50],[0,30]], search_radius = 20, iter_max=100000, visualize=True, enable_dubins_paths=True, min_turning_radius=6)
+    batch_informed_star = BITStar(x_start, x_goal, map_size=[[0,50],[0,30]], search_radius = 10, iter_max=100000, visualize=True, enable_dubins_paths=False, min_turning_radius=6)
     batch_informed_star.add_obstacles([(10,10),(15,15)])
     batch_informed_star.add_obstacles([(20,20),(25,25)])
     batch_informed_star.add_obstacles([(25,15),(30,20)])

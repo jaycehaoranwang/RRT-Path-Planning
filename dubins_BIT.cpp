@@ -14,6 +14,7 @@
 #include <cmath>
 #include <Eigen/Dense>
 #include <random>
+#include <chrono>
 
 class BIT_Planner
 {
@@ -33,6 +34,7 @@ class BIT_Planner
         std::priority_queue<EdgeCost_t, std::vector<EdgeCost_t>, CompareQueuePairCosts> m_edge_queue {};
         std::priority_queue<VertexCost_t, std::vector<VertexCost_t>, CompareQueuePairCosts> m_vertex_queue {};
         std::unordered_map<node_ptr_t, float, NPHash, NPNodeEqual> m_cost_to_node_dict {};
+        bool m_solution_existence {false};
         const float m_search_radius {};
         constexpr int m_max_kdtree_leafs = 10;
         const float m_cMin {};
@@ -132,6 +134,13 @@ class BIT_Planner
         float true_cost(const node_ptr_t& start_n, const node_ptr_t& end_n)
         {
             // Need to implement
+            if (m_env_map.path_collision(start_n, end_n))
+            {
+                return inf;
+            } else 
+            {
+                return calc_dist_and_angle(*start_n, *end_n).first;
+            }
         }
 
         void ExpandVertex(const node_ptr_t& vertex_node, KDTree_t& samples_kdtree, KDTree_t& vertex_kdtree, const std::vector<node_ptr_t>& samples_vec, const std::vector<node_ptr_t>& vertex_vec)
@@ -321,6 +330,19 @@ class BIT_Planner
             }
         }
 
+        void empty_queues()
+        {
+            while (!m_edge_queue.empty()) 
+            {
+                m_edge_queue.pop();
+            }
+
+            while (!m_vertex_queue.empty()) 
+            {
+                m_vertex_queue.pop();
+            }
+        }
+
     public:
         BIT_Dubins_Planner(Node& start, Node& goal, const std::vector<float>& discrete_headings, Environment_Map& env_map, float search_radius, 
                             const int max_iters, const float min_turning_radius, const int batch_sample_count)
@@ -344,13 +366,30 @@ class BIT_Planner
             m_explored_vertices.insert(m_shared_start_ptr);
             m_cost_to_node_dict[m_shared_start_ptr] = 0.0f;
             m_cost_to_node_dict[m_shared_goal_ptr] = inf;
+        }
 
+        std::pair<std::vector<std::pair<float, float>>,float> extract_best_path()
+        {
+            float path_cost = 0.0f;
+            assert(m_solution_existence && "Error: Solution extraction CANNOT be called if no solution exist");
+            std::vector<std::pair<float, float>> solution_path;
+            solution_path.push_back(std::make_pair(m_goal.get_x(), m_goal.get_y()));
+            node_ptr_t curr_node = m_shared_goal_ptr;
+            while (curr_node->get_parent() != nullptr)
+            {
+                path_cost = path_cost + calc_dist_and_angle(*curr_node,*(curr_node->get_parent())).first;
+                curr_node = curr_node->get_parent();
+                solution_path.push_back(std::make_pair(curr_node.get_x(), curr_node.get_y()));
+            }
+            return std::make_pair(solution_path,path_cost);
         }
 
         std::vector<std::pair> plan()
-        {
+        {   
             // Main search/planning loop, modify as required during implementation in car
+            auto start = std::chrono::high_resolution_clock::now();
             for (int i=0; i<m_max_iters; i++){
+                bool no_solution = false;
                 if (m_vertex_queue.empty() && m_edge_queue.empty())
                 {
                     // If first batch, double the number of sampled points
@@ -388,7 +427,20 @@ class BIT_Planner
 
                 while (BestVertexQueueValue() <= BestEdgeQueueValue())
                 {
+                    if (m_vertex_queue.empty())
+                    {
+                        no_solution = true;
+                        break;
+                    }
                     ExpandVertex(BestInVertexQueue(), samples_tree, vertex_tree, samples_vec, vertex_vec);
+                }
+
+                if (no_solution)
+                {
+                    // No solution for this batch, empty queues and move to next batch
+                    empty_queues();
+                    std::cout << "No solution found, going to next batch" << std::endl;
+                    continue;
                 }
 
                 node_ptr_pair_t best_edge = BestInEdgeQueue();
@@ -464,16 +516,16 @@ class BIT_Planner
 
                 } else 
                 {
-                    // Empty both queues by popping all elements
-                    while (!m_edge_queue.empty()) 
+                    empty_queues();
+                    if (!m_solution_existence)
                     {
-                        m_edge_queue.pop();
+                        m_solution_existence = true;
                     }
-
-                    while (!m_vertex_queue.empty()) 
-                    {
-                        m_vertex_queue.pop();
-                    }
+                    auto end = std::chrono::high_resolution_clock::now();
+                    std::chrono::duration<double> elapsed = end - start;
+                    std::cout << "Batch Complete, Path Found With Cost: " << extract_best_path().second <<std::endl;
+                    std::cout << "Time from Start/Last Solution (s): " << elapsed.count() << std::endl;
+                    auto start = std::chrono::high_resolution_clock::now();
                 }
             }
         }
@@ -481,6 +533,26 @@ class BIT_Planner
 
 
 int main()
-{
+{   
+    /*
+    BIT_Dubins_Planner(Node& start, Node& goal, const std::vector<float>& discrete_headings, Environment_Map& env_map, float search_radius, 
+                            const int max_iters, const float min_turning_radius, const int batch_sample_count)
+                            */
+    std::vector<float> dubins_headings = {0.0f};
+    std::array<float,4> obs_one = {10.0f, 10.0f, 15.0f, 15.0f};
+    std::array<float,4> obs_two = {20.0f, 20.0f, 25.0f, 25.0f};
+    std::array<float,4> obs_three = {25.0f, 15.0f, 30.0f, 20.0f};
+    Environment_Map map(std::make_pair(0.0f, 50.0f), std::make_pair(0.0f, 30.0f));
+    map.add_obstacles(obs_one);
+    map.add_obstacles(obs_two);
+    map.add_obstacles(obs_three);
+    Node start_node(2.0f, 15.0f);
+    Node goal_node(45.0f, 15.0f);
+    float search_r = 10.0f;
+    const int max_iters = 10000;
+    const float min_turning_radius = 0.0f;
+    const int batch_sample_count = 100;
+    BIT_Planner bit_planner(start_node, goal_node, dubins_headings, map, search_r, max_iters, min_turning_radius, batch_sample_count);
+    bit_planner.plan();
     return 0;
 };
