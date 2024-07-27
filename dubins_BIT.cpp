@@ -9,16 +9,227 @@
 #include <unordered_map>
 #include <limits>
 #include <cmath>
-#include <Eigen/Dense>
+#include "Eigen/Dense"
 #include <random>
 #include <chrono>
-
-#include "planning/utils/nanoflann.hpp"
-#include "planning/BIT_local_planner.hpp"
-#include "mapping/types/pose2.hpp"
+#include <set>
+#include "nanoflann.hpp"
+#include "dubins_BIT.hpp"
+//#include "planning/utils/nanoflann.hpp"
+//#include "planning/BIT_local_planner.hpp"
+//#include "mapping/types/pose2.hpp"
 
 class BIT_Planner
 {
+    public:
+        BIT_Planner(BIT_Node& start, BIT_Node& goal, const std::vector<float>& discrete_headings, Environment_Map& env_map, float search_radius, const int max_iters, const float min_turning_radius, const int batch_sample_count)
+            : m_start {start}
+            , m_goal {goal}
+            , m_discrete_headings {discrete_headings}
+            , m_env_map {env_map}
+            , m_min_turning_radius {min_turning_radius}        
+            , m_search_radius {search_radius}
+            , m_cMin {calc_dist_and_angle(m_start, m_goal).first}
+            , m_theta {calc_dist_and_angle(m_start, m_goal).second}
+            , m_max_iters {max_iters}
+            , m_batch_sample_count {batch_sample_count}
+            , m_C {RotationToWorldFrame(m_start, m_goal, m_cMin)}
+            , m_ellipse_center {Eigen::Vector3f((m_start.get_x() + m_goal.get_x()) / 2.0f, (m_start.get_y() + m_goal.get_y()) / 2.0f, 0.0f)}
+        {
+            m_shared_start_ptr = std::make_shared<BIT_Node>(m_start);
+            m_shared_goal_ptr = std::make_shared<BIT_Node>(m_goal);
+
+            m_map_samples.insert(m_shared_goal_ptr);
+            m_explored_vertices.insert(m_shared_start_ptr);
+            m_cost_to_node_dict[m_shared_start_ptr] = 0.0f;
+            m_cost_to_node_dict[m_shared_goal_ptr] = inf;
+
+        };
+        std::pair<std::vector<std::pair<float, float>>,float> extract_best_path()
+        {
+            float path_cost = 0.0f;
+            assert(m_solution_existence && "Error: Solution extraction CANNOT be called if no solution exist");
+            std::vector<std::pair<float, float>> solution_path;
+            solution_path.push_back(std::make_pair(m_goal.get_x(), m_goal.get_y()));
+            BIT_node_ptr_t curr_node = m_shared_goal_ptr;
+            while (curr_node->get_parent() != nullptr)
+            {
+                path_cost = path_cost + calc_dist_and_angle(*curr_node,*(curr_node->get_parent())).first;
+                curr_node = curr_node->get_parent();
+                solution_path.push_back(std::make_pair(curr_node->get_x(), curr_node->get_y()));
+            }
+            return std::make_pair(solution_path,path_cost);
+        }
+
+        void plan()
+        {
+            std::cout<< "In Plan" << std::endl;
+            KDTree_t samples_kdtree(2 /* dimensions */, m_samples_kdAdapter, {m_max_kdtree_leafs /* Leaf nodes*/});
+            KDTree_t vertex_kdtree(2 /* dimensions */, m_vertex_kdAdapter, {m_max_kdtree_leafs /* Leaf nodes*/});
+            std::vector<BIT_node_ptr_t> samples_vec {};
+            std::vector<BIT_node_ptr_t> vertex_vec {};
+            bool no_solution = false;
+            // Main search/planning loop, modify as required during implementation in car
+            auto start = std::chrono::high_resolution_clock::now();
+            std::cout<< "Starting Iters" << std::endl;
+            for (int i=0; i<m_max_iters; i++)
+            {
+                no_solution = false;
+                if (m_vertex_queue.empty() && m_edge_queue.empty())
+                {
+
+                    Prune(m_cost_to_node_dict[m_shared_goal_ptr]);
+                    SamplePoints(m_cost_to_node_dict[m_shared_goal_ptr]);
+
+                    m_samples_kdAdapter.nodes = m_map_samples;
+                    samples_kdtree.buildIndex();
+                    samples_vec.clear();
+                    samples_vec.insert(samples_vec.end(),m_map_samples.begin(), m_map_samples.end());
+
+                    m_vertex_kdAdapter.nodes = m_explored_vertices;
+                    vertex_kdtree.buildIndex();
+                    vertex_vec.clear();
+                    vertex_vec.insert(vertex_vec.end(),m_explored_vertices.begin(), m_explored_vertices.end());
+                    m_explored_vertices_old = m_explored_vertices;
+                    // Iterate through vertex set and add them to priority q
+                    std::cout << "In Prune: Explored Vertices set size: " << m_explored_vertices.size() << std::endl;
+                    std::cout << "In Prune: g_T dict size: " << m_cost_to_node_dict.size() << std::endl;
+
+                    for (auto it = m_explored_vertices.begin(); it != m_explored_vertices.end();) 
+                    {
+                        // Check if the node exist in the map/cost dictionary
+                        try 
+                        {
+                            // Accessing a possibly non-existing key using at()
+                            float vertex_value = m_cost_to_node_dict.at(*it);
+                            m_vertex_queue.push(std::make_pair(*it,vertex_value+h_estimated(**it)));
+                        } catch (const std::out_of_range& e) //.at will throw out of range error if key doesnt exist in map
+                        {
+                            m_cost_to_node_dict[*it] = inf; 
+                            m_vertex_queue.push(std::make_pair(*it,inf));
+                        }
+                        ++it;
+                    }
+                    
+                }
+
+                while (BestVertexQueueValue() <= BestEdgeQueueValue())
+                {
+                    if (m_vertex_queue.empty())
+                    {
+                        std::cout<< "in plan: vertex queue is empty, breaking" << std::endl;
+                        no_solution = true;
+                        break;
+                    }
+                    ExpandVertex(BestInVertexQueue(), samples_kdtree, vertex_kdtree, samples_vec, vertex_vec);
+                }
+
+                if (no_solution)
+                {
+                    // No solution for this batch, empty queues and move to next batch
+                    empty_queues();
+                    std::cout << "No solution found, going to next batch" << std::endl;
+                    continue;
+                }
+
+                BIT_node_ptr_pair_t best_edge = BestInEdgeQueue();
+                m_edge_queue.pop(); //remove the above edge from the queue
+                float estimated_cost_to_goal = h_estimated(*(best_edge.second));
+                if (m_cost_to_node_dict[best_edge.first] + calc_dist_and_angle(*(best_edge.first), *(best_edge.second)).first + estimated_cost_to_goal < m_cost_to_node_dict[m_shared_goal_ptr])
+                {
+                    const float actual_edge_cost = true_cost(best_edge.first, best_edge.second); // NEED TO BE IMPLEMENTED WITH FULL COLLISION CHECKING/DUBINS
+                    if (g_estimated(*(best_edge.first)) + actual_edge_cost + estimated_cost_to_goal < m_cost_to_node_dict[m_shared_goal_ptr])
+                    {
+                        if (m_cost_to_node_dict[best_edge.first] + actual_edge_cost < m_cost_to_node_dict[best_edge.second])
+                        {
+                            if (m_explored_vertices.find(best_edge.second) != m_explored_vertices.end()) // if second vertex in edge is in vertex set
+                            {
+                                // remove edges that contain this vertex
+                                for (auto it = m_explored_edges.begin(); it != m_explored_edges.end();) 
+                                {
+                                    // Edges are stored as a pair of pointers to nodes
+                                    const auto& pair = *it;
+                                    if (pair.second == best_edge.second) 
+                                    {
+                                        it = m_explored_edges.erase(it); // Erase returns the next iterator
+                                    } else {
+                                        ++it; // Move to the next element
+                                    }
+                                }
+
+                            } else 
+                            {
+                                m_map_samples.erase(best_edge.second);
+                                m_samples_kdAdapter.nodes = m_map_samples;
+                                samples_kdtree.buildIndex();
+                                samples_vec.clear();
+                                samples_vec.insert(samples_vec.end(),m_map_samples.begin(), m_map_samples.end());
+
+                                std::cout << "In plan: adding to explored vertex set" << std::endl;
+                                m_explored_vertices.insert(best_edge.second);
+                                m_vertex_kdAdapter.nodes = m_explored_vertices;
+                                vertex_kdtree.buildIndex();
+                                vertex_vec.clear();
+                                vertex_vec.insert(vertex_vec.end(),m_explored_vertices.begin(), m_explored_vertices.end());
+
+                                try 
+                                {
+                                    // Accessing a possibly non-existing key using at()
+                                    float vertex_value = m_cost_to_node_dict.at(best_edge.second);
+                                    m_vertex_queue.push(std::make_pair(best_edge.second,vertex_value+h_estimated(*(best_edge.second))));
+                                } catch (const std::out_of_range& e) //.at will throw out of range error if key doesnt exist in map
+                                {
+                                    m_cost_to_node_dict[best_edge.second] = inf; 
+                                    m_vertex_queue.push(std::make_pair(best_edge.second,inf));
+                                }
+                            }
+
+
+                            m_cost_to_node_dict[best_edge.second] = m_cost_to_node_dict[best_edge.first] + actual_edge_cost;
+                            m_explored_edges.insert(best_edge);
+                            best_edge.second->set_parent(best_edge.first);
+                        
+                            //Copy over to a vector bc priority queue cannot be iterated through
+                            std::vector<EdgeCost_t> edge_Q_elements;
+                            // Extract elements from the temporary queue and store them in the vector
+                            while (!m_edge_queue.empty()) 
+                            {
+                                edge_Q_elements.push_back(m_edge_queue.top());
+                                m_edge_queue.pop();
+                            }
+
+                            for (auto it = edge_Q_elements.begin(); it != edge_Q_elements.end();) 
+                            {
+                                const EdgeCost_t& edge_pair = *it;
+                                if ((edge_pair.first.second == best_edge.second) && 
+                                (m_cost_to_node_dict[edge_pair.first.first] + calc_dist_and_angle(*(edge_pair.first.first),*(best_edge.second)).first >= m_cost_to_node_dict[best_edge.second]))
+                                {
+                                    it = edge_Q_elements.erase(it);
+                                } else 
+                                {
+                                    m_edge_queue.push(edge_pair);
+                                    ++it;
+                                }
+                            }
+                        }
+                    }
+
+                } else 
+                {
+                    empty_queues();
+                    if (!m_solution_existence)
+                    {
+                        m_solution_existence = true;
+                    }
+                    auto end = std::chrono::high_resolution_clock::now();
+                    std::chrono::duration<double> elapsed = end - start;
+                    std::cout << "Batch Complete, Path Found With Cost: " << extract_best_path().second <<std::endl;
+                    std::cout << "Time from Start/Last Solution (s): " << elapsed.count() << std::endl;
+                    auto start = std::chrono::high_resolution_clock::now();
+                }
+            }
+        }
+
     private:
         BIT_Node m_start;
         BIT_Node m_goal;
@@ -37,7 +248,7 @@ class BIT_Planner
         std::unordered_map<BIT_node_ptr_t, float, NPHash, NPNodeEqual> m_cost_to_node_dict {};
         bool m_solution_existence {false};
         const float m_search_radius {};
-        constexpr int m_max_kdtree_leafs = 10;
+        const size_t m_max_kdtree_leafs = 10;
         const float m_cMin {};
         const float m_theta {};
         const float m_min_turning_radius {};
@@ -45,7 +256,6 @@ class BIT_Planner
         const int m_batch_sample_count {};
         const Eigen::Matrix3f m_C {};
         const Eigen::Vector3f m_ellipse_center {};
-        const bool m_enable_dubins {false};
 
         std::pair<float, float> calc_dist_and_angle(const BIT_Node& start_node, const BIT_Node& end_node) const
         {
@@ -85,7 +295,7 @@ class BIT_Planner
 
         void Prune(const float best_cost)
         {
-            // Prune samples in map_samples
+             // Prune samples in map_samples
             for (auto it = m_map_samples.begin(); it != m_map_samples.end();) {
                 if (f_estimated(**it) < best_cost) {
                     ++it; // Move to the next element
@@ -111,10 +321,11 @@ class BIT_Planner
                 }
             }
 
-            std::unordered_set<BIT_node_ptr_t> temp_vertexs {};
+            std::unordered_set<BIT_node_ptr_t, NPHash, NPNodeEqual> temp_vertexs {};
             for (auto it = m_explored_vertices.begin(); it != m_explored_vertices.end();) {
-                if (m_cost_to_node_dict[*it] == inf) {
-                    temp_vertexs.insert(*it)
+                if (m_cost_to_node_dict[*it] == inf) 
+                {
+                    temp_vertexs.insert(*it);
                 } else {
                     ++it; // Move to the next element
                 }
@@ -144,24 +355,16 @@ class BIT_Planner
                 return calc_dist_and_angle(*start_n, *end_n).first;
             }
         }
-            // Need to implement, computes the true cost between two nodes, enable/disable dubins here
-            if (m_enable_dubins)
-            {
 
-            } else 
-            {
-                m_
-            }
-        }
 
         void ExpandVertex(const BIT_node_ptr_t& vertex_node, KDTree_t& samples_kdtree, KDTree_t& vertex_kdtree, const std::vector<BIT_node_ptr_t>& samples_vec, const std::vector<BIT_node_ptr_t>& vertex_vec)
         {
-            // Remove vertex from vertex priority queue, but if using priority queue vertex should be removed from queue already when retrieved
-            
+            // Remove vertex from vertex priority queue, the top item popped SHOULD be the vertex node
+            m_vertex_queue.pop();
             float g_estimated_vertex = g_estimated(*vertex_node);
             //Find nodes near arg vertex_node
             std::vector<nanoflann::ResultItem<float, float>> ret_matches_samples;
-            const float query_pt[2] = {vertex_node->get_x(),vertex_node->get_y()}
+            const float query_pt[2] = {vertex_node->get_x(),vertex_node->get_y()};
             const size_t nMatches_samples = samples_kdtree.radiusSearch(&query_pt[0], m_search_radius, ret_matches_samples);
             std::unordered_set<BIT_node_ptr_t, NPHash, NPNodeEqual> samples_near;
             for (size_t i = 0; i < nMatches_samples; i++)
@@ -171,7 +374,7 @@ class BIT_Planner
 
             for (auto it = samples_near.begin(); it != samples_near.end();) 
             {
-                float edge_distance = calc_dist_and_angle(*vertex_node,**it).first
+                float edge_distance = calc_dist_and_angle(*vertex_node,**it).first;
                 float h_estimated_cost = h_estimated(**it);
                 if (g_estimated_vertex + edge_distance + h_estimated_cost < m_cost_to_node_dict[m_shared_goal_ptr]) 
                 {
@@ -215,23 +418,6 @@ class BIT_Planner
                     ++it;
                 }
             }
-        }
-
-
-        KDTree_t BuildSamplesKdtree()
-        {
-            m_samples_kdAdapter.nodes = m_map_samples;
-            KDTree_t samples_kdtree(2 /* dimensions */, m_samples_kdAdapter, {m_max_kdtree_leafs /* Leaf nodes*/});
-            samples_kdtree.buildIndex();
-            return samples_kdtree
-        }
-
-        KDTree_t BuildVertexKdtree()
-        {
-            m_vertex_kdAdapter.nodes = m_explored_vertices;
-            KDTree_t vertex_kdtree(2 /* dimensions */, m_vertex_kdAdapter, {m_max_kdtree_leafs /* Leaf nodes*/});
-            vertex_kdtree.buildIndex();
-            return vertex_kdtree
         }
 
         float BestVertexQueueValue() const
@@ -295,7 +481,7 @@ class BIT_Planner
         void SampleEllipsoid(const float cMax)
         {
             Eigen::Vector3f r(cMax / 2.0f, std::sqrt(cMax*cMax - m_cMin*m_cMin)/2.0f, std::sqrt(cMax*cMax - m_cMin*m_cMin)/2.0f);
-            Eigen::Matrix3f L = Eigen::Matrix3d::Zero();
+            Eigen::Matrix3f L = Eigen::Matrix3d::Zero().cast<float>();
             L.diagonal() = r;
 
             int sample_count = 0;
@@ -314,6 +500,7 @@ class BIT_Planner
 
         void SampleFreeSpace()
         {
+
             int sample_count = 0;
             std::random_device rd;
             std::mt19937 gen(rd());
@@ -326,7 +513,7 @@ class BIT_Planner
                 {
                     m_map_samples.insert(new_node);
                     sample_count++;
-                }
+                }                
             }
         }
 
@@ -354,174 +541,6 @@ class BIT_Planner
             }
         }
 
-    public:
-        BIT_Dubins_Planner(BIT_Node& start, BIT_Node& goal, const std::vector<float>& discrete_headings, Environment_Map& env_map, float search_radius, 
-                            const int max_iters, const float min_turning_radius, const int batch_sample_count, const bool enable_dubins)
-            : m_start {start}
-            , m_goal {goal}
-            , m_discrete_headings {discrete_headings}
-            , m_env_map {env_map}
-            , m_min_turning_radius {min_turning_radius}        
-            , m_search_radius {search_radius}
-            , m_cMin {calc_dist_and_angle(m_start, m_goal).first}
-            , m_theta {calc_dist_and_angle(m_start, m_goal).second}
-            , m_max_iters {max_iters}
-            , m_batch_sample_count {batch_sample_count}
-            , m_C {RotationToWorldFrame(m_start, m_goal, cMin)}
-            , m_ellipse_center {Eigen::Vector3f((m_start.get_x() + m_goal.get_x()) / 2.0f, (m_start.get_y() + m_goal.get_y()) / 2.0f, 0.0f)}
-            , m_enable_dubins {enable_dubins}
-        {
-            m_shared_start_ptr = std::make_shared<BIT_Node>(m_start);
-            m_shared_goal_ptr = std::make_shared<BIT_Node>(m_goal);
-
-            m_map_samples.insert(m_shared_goal_ptr);
-            m_explored_vertices.insert(m_shared_start_ptr);
-            m_cost_to_node_dict[m_shared_start_ptr] = 0.0f;
-            m_cost_to_node_dict[m_shared_goal_ptr] = inf;
-
-        }
-
-        void plan()
-        {
-
-            // Main search/planning loop, modify as required during implementation in car
-            auto start = std::chrono::high_resolution_clock::now();
-            for (int i=0; i<m_max_iters; i++)
-            {
-                bool no_solution = false;
-                if (m_vertex_queue.empty() && m_edge_queue.empty())
-                {
-
-                    Prune(m_cost_to_node_dict[m_shared_goal_ptr]);
-                    SamplePoints(m_cost_to_node_dict[m_shared_goal_ptr]);
-                    m_explored_vertices_old = m_explored_vertices;
-                    // Iterate through vertex set and add them to priority q
-                    for (auto it = m_explored_vertices.begin(); it != m_explored_vertices.end();) 
-                    {
-                        // Check if the node exist in the map/cost dictionary
-                        try 
-                        {
-                            // Accessing a possibly non-existing key using at()
-                            float vertex_value = m_cost_to_node_dict.at(*it);
-                            m_vertex_queue.push(std::make_pair(*it,vertex_value+h_estimated(**it)));
-                        } catch (const std::out_of_range& e) //.at will throw out of range error if key doesnt exist in map
-                        {
-                            m_cost_to_node_dict[*it] = inf; 
-                            m_vertex_queue.push(std::make_pair(*it,inf));
-                        }
-                    }
-                }
-
-                // Before ExpandVertex loop cbuild the kd trees and make a vector c
-                std::vector<BIT_node_ptr_t> samples_vec(m_map_samples.begin(), m_map_samples.end());
-                std::vector<BIT_node_ptr_t> vertex_vec(m_explored_vertices.begin(), m_explored_vertices.end());
-                KDTree_t samples_tree = build_samples_kdtree();
-                KDTree_t vertex_tree = build_vertex_kdtree();
-
-                while (BestVertexQueueValue() <= BestEdgeQueueValue())
-                {
-                    if (m_vertex_queue.empty())
-                    {
-                        no_solution = true;
-                        break;
-                    }
-                    ExpandVertex(BestInVertexQueue(), samples_tree, vertex_tree, samples_vec, vertex_vec);
-                }
-
-                if (no_solution)
-                {
-                    // No solution for this batch, empty queues and move to next batch
-                    empty_queues();
-                    std::cout << "No solution found, going to next batch" << std::endl;
-                    continue;
-                }
-
-                BIT_node_ptr_pair_t best_edge = BestInEdgeQueue();
-                m_edge_queue.pop(); //remove the above edge from the queue
-                float estimated_cost_to_goal = h_estimated(*(best_edge.second);
-                if (m_cost_to_node_dict[best_edge.first] + calc_dist_and_angle(*(best_edge.first), *(best_edge.second)).first + estimated_cost_to_goal) <  m_cost_to_node_dict[m_shared_goal_ptr])
-                {
-                    const float actual_edge_cost = true_cost(best_edge.first, best_edge.second); // NEED TO BE IMPLEMENTED WITH FULL COLLISION CHECKING/DUBINS
-                    if (g_estimated(*(best_edge.first)) + actual_edge_cost + estimated_cost_to_goal < m_cost_to_node_dict[m_shared_goal_ptr])
-                    {
-                        if (m_cost_to_node_dict[best_edge.first] + actual_edge_cost < m_cost_to_node_dict[best_edge.second])
-                        {
-                            if (m_explored_vertices.find(best_edge.second) != m_explored_vertices.end()) // if second vertex in edge is in vertex set
-                            {
-                                // remove edges that contain this vertex
-                                for (auto it = m_explored_edges.begin(); it != m_explored_edges.end();) 
-                                {
-                                    // Edges are stored as a pair of pointers to nodes
-                                    const auto& pair = *it;
-                                    if (pair.second == best_edge.second) 
-                                    {
-                                        it = m_explored_edges.erase(it); // Erase returns the next iterator
-                                    } else {
-                                        ++it; // Move to the next element
-                                    }
-                                }
-
-                            } else 
-                            {
-                                m_map_samples.erase(best_edge.second);
-                                m_explored_vertices.insert(best_edge.second);
-                                try 
-                                {
-                                    // Accessing a possibly non-existing key using at()
-                                    float vertex_value = m_cost_to_node_dict.at(best_edge.second);
-                                    m_vertex_queue.push(std::make_pair(best_edge.second,vertex_value+h_estimated(*(best_edge.second))));
-                                } catch (const std::out_of_range& e) //.at will throw out of range error if key doesnt exist in map
-                                {
-                                    m_cost_to_node_dict[best_edge.second] = inf; 
-                                    m_vertex_queue.push(std::make_pair(best_edge.second,inf));
-                                }
-                            }
-
-
-                            m_cost_to_node_dict[best_edge.second] = m_cost_to_node_dict[best_edge.first] + actual_edge_cost;
-                            m_explored_edges.insert(best_edge);
-                            best_edge.second->set_parent(best_edge.first);
-                        
-                            //Copy over to a vector bc priority queue cannot be iterated through
-                            std::vector<EdgeCost_t> edge_Q_elements;
-                            // Extract elements from the temporary queue and store them in the vector
-                            while (!m_edge_queue.empty()) 
-                            {
-                                edge_Q_elements.push_back(m_edge_queue.top());
-                                m_edge_queue.pop();
-                            }
-
-                            for (auto it = edge_Q_elements.begin(); it != edge_Q_elements.end();) 
-                            {
-                                const EdgeCost_t& edge_pair = *it;
-                                if ((edge_pair.first.second == best_edge.second) && 
-                                (m_cost_to_node_dict[edge_pair.first.first] + calc_dist_and_angle(*(edge_pair.first.first),*(best_edge.second)).first >= m_cost_to_node_dict[best_edge.second]))
-                                {
-                                    it = edge_Q_elements.erase(it);
-                                } else 
-                                {
-                                    m_edge_queue.push(edge_pair)
-                                    ++it;
-                                }
-                            }
-                        }
-                    }
-
-                } else 
-                {
-                    empty_queues();
-                    if (!m_solution_existence)
-                    {
-                        m_solution_existence = true;
-                    }
-                    auto end = std::chrono::high_resolution_clock::now();
-                    std::chrono::duration<double> elapsed = end - start;
-                    std::cout << "Batch Complete, Path Found With Cost: " << extract_best_path().second <<std::endl;
-                    std::cout << "Time from Start/Last Solution (s): " << elapsed.count() << std::endl;
-                    auto start = std::chrono::high_resolution_clock::now();
-                }
-            }
-        }
 };
 
 
@@ -539,12 +558,12 @@ int main()
     map.add_obstacles(obs_one);
     map.add_obstacles(obs_two);
     map.add_obstacles(obs_three);
-    Node start_node(2.0f, 15.0f);
-    Node goal_node(45.0f, 15.0f);
-    float search_r = 10.0f;
+    BIT_Node start_node(2.0f, 15.0f);
+    BIT_Node goal_node(45.0f, 15.0f);
+    float search_r = 20.0f;
     const int max_iters = 10000;
     const float min_turning_radius = 0.0f;
-    const int batch_sample_count = 100;
+    const int batch_sample_count = 200;
     BIT_Planner bit_planner(start_node, goal_node, dubins_headings, map, search_r, max_iters, min_turning_radius, batch_sample_count);
     bit_planner.plan();
     return 0;

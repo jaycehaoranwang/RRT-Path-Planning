@@ -13,7 +13,7 @@
 #include <limits>
 #include <cmath>
 
-#include "planning/utils/nanoflann.hpp"
+#include "nanoflann.hpp"
 
 constexpr float PI = 3.14159265358979323846f;
 
@@ -41,12 +41,12 @@ class BIT_Node
         }
         float get_heading() const 
         {
-            return heading;
+            return m_heading;
         }
 
         std::shared_ptr<BIT_Node> get_parent() const 
         {
-            return parent;
+            return m_parent;
         }
 
         void set_heading(float heading)
@@ -73,7 +73,7 @@ class BIT_Node
         // Equality operator
         bool operator==(const BIT_Node& other) const
         {
-            return x == other.x && y == other.y && heading == other.heading && parent == other.parent;
+            return x == other.x && y == other.y && m_heading == other.m_heading && m_parent == other.m_parent;
         }
 
 
@@ -146,7 +146,7 @@ class Environment_Map
             return m_y_range;
         }
 
-        bool point_collision(const std::shared_ptr<Node>& node_ptr) const
+        bool point_collision(const std::shared_ptr<BIT_Node>& node_ptr) const
         {
             /*
             Check if a node/point is feasible to exist in the given map, ensure it is within map bounds+clearances, not inside obstacles or within obs clearance bounds
@@ -168,7 +168,7 @@ class Environment_Map
 
            return false;
         }
-        bool path_collision(const std::shared_ptr<Node>& start, const std::shared_ptr<Node>& end) const
+        bool path_collision(const std::shared_ptr<BIT_Node>& start, const std::shared_ptr<BIT_Node>& end) const
         {
             /*
             Check if a path collides with any obstacles and their safety bounds/other collision conditions, assumes straight line paths for now
@@ -247,7 +247,7 @@ struct NPHash {
         size_t h1 = std::hash<float>()(np->get_x());
         size_t h2 = std::hash<float>()(np->get_y());
         size_t h3 = std::hash<float>()(np->get_heading());
-        size_t h4 = std::hash<BIT_node_ptr_t>()(np->get_parent());
+        size_t h4 = np->get_parent() ? std::hash<float>()(np->get_parent()->get_x()) : 0;
         
         // Combine the hash values using prime numbers
         return h1 ^ (h2 * 2) ^ (h3 * 3) ^ (h4 * 11); // Prime number multipliers
@@ -267,7 +267,7 @@ struct CompareQueuePairCosts {
     template<typename T>
     bool operator()(const std::pair<T, float>& lhs, const std::pair<T, float>& rhs) const {
         // Compare based on the float value
-        return lhs.second < rhs.second; // Change to < for min heap
+        return lhs.second > rhs.second; // Change to < for min heap
     }
 };
 
