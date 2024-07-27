@@ -29,8 +29,8 @@ class Tree:
 
 class BITStar:
     def __init__(self, x_start, x_goal, map_size, search_radius=10, iter_max=500, visualize=True, seed = None, enable_dubins_paths = False, min_turning_radius = None):
-        self.x_start = Node(x_start[0], x_start[1], heading=0)
-        self.x_goal = Node(x_goal[0], x_goal[1], heading=0)
+        self.x_start = Node(x_start[0], x_start[1], heading=x_start[2])
+        self.x_goal = Node(x_goal[0], x_goal[1], heading=x_goal[2])
         self.iter_max = iter_max
         self.enable_dubins_paths = enable_dubins_paths
         self.fig, self.ax = plt.subplots()
@@ -120,9 +120,14 @@ class BITStar:
             else:
                 self.Tree.QE = set()
                 self.Tree.QV = set()
+                end = time.time()
+                _,_,cost = self.ExtractPath()
+                print("Batch Time:", end-start)
+                print("Cost:", cost)
+                start = time.time()
                 if self.visualize:
-                    print("Batch Complete")
-                    self.draw_graph(xCenter, self.g_T[self.x_goal] ,cMin, theta)
+                        print("Batch Complete")
+                        self.draw_graph(xCenter, self.g_T[self.x_goal] ,cMin, theta)
             
         print("Planning Done")
         print("Solution path cost:",self.g_T[self.x_goal])
@@ -145,7 +150,7 @@ class BITStar:
             node = node.parent
             path_x.append(node.x)
             path_y.append(node.y)
-
+        print("Path Length:", len(path_x))
         return path_x, path_y, path_cost
     
     def ExtractDubinsPath(self):
@@ -554,14 +559,21 @@ class BITStar:
         plt.pause(5)
 
 def main():
-    x_start = (2,15)  # Starting node
-    x_goal = (45, 15)  # Goal node
+    x_start = (2,15,0)  # Starting node
+    x_goal = (45, 15, 0)  # Goal node
+    #x_goal = (25, 3, 270)
+    batch_informed_star = BITStar(x_start, x_goal, map_size=[[0,50],[0,30]], search_radius = 5, iter_max=100000, visualize=False, enable_dubins_paths=False, min_turning_radius=15)
     
-    batch_informed_star = BITStar(x_start, x_goal, map_size=[[0,50],[0,30]], search_radius = 20, iter_max=100000, visualize=True, enable_dubins_paths=True, min_turning_radius=6)
     batch_informed_star.add_obstacles([(10,10),(15,15)])
     batch_informed_star.add_obstacles([(20,20),(25,25)])
     batch_informed_star.add_obstacles([(25,15),(30,20)])
-    
+    '''
+    #Intersection sim
+    batch_informed_star.add_obstacles([(0,20),(20,30)])
+    batch_informed_star.add_obstacles([(30,20),(50,30)])
+    batch_informed_star.add_obstacles([(0,0),(20,10)])
+    batch_informed_star.add_obstacles([(30,0),(50,10)])
+    '''
     batch_informed_star.planning()
 
 

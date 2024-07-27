@@ -1,6 +1,6 @@
 #ifndef BIT_PLANNER_HEADER
 #define BIT_PLANNER_HEADER
-#include "nanoflann.hpp"
+
 #include <array>
 #include <tuple>
 #include <vector>
@@ -12,6 +12,8 @@
 #include <unordered_map>
 #include <limits>
 #include <cmath>
+
+#include "planning/utils/nanoflann.hpp"
 
 constexpr float PI = 3.14159265358979323846f;
 
@@ -48,7 +50,7 @@ class Environment_Map
             return m_y_range;
         }
 
-        bool point_collision(std::shared_ptr<Node>& node_ptr)
+        bool point_collision(std::shared_ptr<BIT_Node>& node_ptr)
         {
             /*
             Check if a node/point is feasible to exist in the given map, ensure it is within map bounds+clearances, not inside obstacles or within obs clearance bounds
@@ -62,16 +64,16 @@ class Environment_Map
         }
 };
 
-class Node
+class BIT_Node
 {
     private:
         float x {};
         float y {};
         float heading {};
-        std::shared_ptr<Node> parent {};
+        std::shared_ptr<BIT_Node> parent {};
     public:
         
-        Node(float arg_x, float arg_y)
+        BIT_Node(float arg_x, float arg_y)
             : x {arg_x}, y {arg_y}
         { // Empty constructor body
         }
@@ -89,7 +91,7 @@ class Node
             return heading;
         }
 
-        std::shared_ptr<Node> get_parent() const 
+        std::shared_ptr<BIT_Node> get_parent() const 
         {
             return parent;
         }
@@ -111,12 +113,12 @@ class Node
             this->heading = normalized;
         }
 
-        void set_parent(std::shared_ptr<Node> parent_pointer)
+        void set_parent(std::shared_ptr<BIT_Node> parent_pointer)
         {
             this->parent = parent_pointer;
         }
         // Equality operator
-        bool operator==(const Node& other) const
+        bool operator==(const BIT_Node& other) const
         {
             return x == other.x && y == other.y && heading == other.heading && parent == other.parent;
         }
@@ -124,32 +126,32 @@ class Node
 
 };
 
-typedef std::shared_ptr<Node> node_ptr_t;
-typedef std::pair<node_ptr_t, node_ptr_t> node_ptr_pair_t;
-typedef std::pair<node_ptr_pair_t,float> EdgeCost_t;
-typedef std::pair<node_ptr_t,float> VertexCost_t;
+typedef std::shared_ptr<BIT_Node> BIT_node_ptr_t;
+typedef std::pair<BIT_node_ptr_t, BIT_node_ptr_t> BIT_node_ptr_pair_t;
+typedef std::pair<BIT_node_ptr_pair_t,float> EdgeCost_t;
+typedef std::pair<BIT_node_ptr_t,float> VertexCost_t;
 constexpr float inf = std::numeric_limits<float>::infinity();
 
 
 
-// Custom hash function for Node pointer objects
+// Custom hash function for BIT_Node pointer objects
 struct NPHash {
-    std::size_t operator()(const node_ptr_t& np) const
+    std::size_t operator()(const BIT_node_ptr_t& np) const
     {
         // Use std::hash for each member
         size_t h1 = std::hash<float>()(np->get_x());
         size_t h2 = std::hash<float>()(np->get_y());
         size_t h3 = std::hash<float>()(np->get_heading());
-        size_t h4 = std::hash<node_ptr_t>()(np->get_parent());
+        size_t h4 = std::hash<BIT_node_ptr_t>()(np->get_parent());
         
         // Combine the hash values using prime numbers
         return h1 ^ (h2 * 2) ^ (h3 * 3) ^ (h4 * 11); // Prime number multipliers
     }
 };
 
-// Custom equality functor for std::shared_ptr<Node>
+// Custom equality functor for std::shared_ptr<BIT_Node>
 struct NPNodeEqual {
-    bool operator()(const node_ptr_t& lhs, const node_ptr_t& rhs) const {
+    bool operator()(const BIT_node_ptr_t& lhs, const BIT_node_ptr_t& rhs) const {
         // Check if the pointed-to objects are equal
         return *lhs == *rhs;
     }
@@ -166,7 +168,7 @@ struct CompareQueuePairCosts {
 
 // Define a custom hash function for std::pair<node_ptr, node_ptr>
 struct PairNPHash {
-    std::size_t operator()(const node_ptr_pair_t& p) const {
+    std::size_t operator()(const BIT_node_ptr_pair_t& p) const {
         std::size_t h1 = NPHash()(p.first);
         std::size_t h2 = NPHash()(p.second);
         return h1 ^ (h2 << 1); // Combine the two hash values
@@ -175,15 +177,15 @@ struct PairNPHash {
 
 // Define a custom equality function for std::pair<node_ptr, node_ptr>, check pointed to nodes are equal
 struct PairNPEqual {
-    bool operator()(const node_ptr_pair_t& p1, const node_ptr_pair_t& p2) const {
+    bool operator()(const BIT_node_ptr_pair_t& p1, const BIT_node_ptr_pair_t& p2) const {
         return (*(p1.first) == *(p2.first)) && (*(p1.second) == *(p2.second));
     }
 };
 
-// nanoflann KD-tree adapter for Node
+// nanoflann KD-tree adapter for BIT_Node
 struct NodeKDTreeAdapter
 {
-    std::unordered_set<node_ptr_t, NPHash, NPNodeEqual> nodes; // Vector of shared_ptr<Node>
+    std::unordered_set<BIT_node_ptr_t, NPHash, NPNodeEqual> nodes; // Vector of shared_ptr<BIT_Node>
 
     // Nanoflann requires a method to return the number of data points
     inline size_t kdtree_get_point_count() const { return nodes.size(); }

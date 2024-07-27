@@ -1,6 +1,3 @@
-#include "dubins_BIT.hpp"
-#include "nanoflann.hpp"
-
 #include <array>
 #include <tuple>
 #include <vector>
@@ -15,24 +12,28 @@
 #include <Eigen/Dense>
 #include <random>
 
+#include "planning/utils/nanoflann.hpp"
+#include "planning/BIT_local_planner.hpp"
+#include "mapping/types/pose2.hpp"
+
 class BIT_Planner
 {
     private:
-        Node m_start;
-        Node m_goal;
-        node_ptr_t m_shared_start_ptr;
-        node_ptr_t m_shared_goal_ptr;
-        const std::vector<float>& m_discrete_headings {};  // Reference member variable
+        BIT_Node m_start;
+        BIT_Node m_goal;
+        BIT_node_ptr_t m_shared_start_ptr;
+        BIT_node_ptr_t m_shared_goal_ptr;
+        const std::vector<float>& m_discrete_headings {};  // only for dubins
         Environment_Map& m_env_map;
         NodeKDTreeAdapter m_samples_kdAdapter;
         NodeKDTreeAdapter m_vertex_kdAdapter;
-        std::unordered_set<node_ptr_t, NPHash, NPNodeEqual> m_map_samples {};
-        std::unordered_set<node_ptr_t, NPHash, NPNodeEqual> m_explored_vertices {};
-        std::unordered_set<node_ptr_t, NPHash, NPNodeEqual> m_explored_vertices_old {};
-        std::unordered_set<node_ptr_pair_t, PairNPHash, PairNPEqual> m_explored_edges {};
+        std::unordered_set<BIT_node_ptr_t, NPHash, NPNodeEqual> m_map_samples {};
+        std::unordered_set<BIT_node_ptr_t, NPHash, NPNodeEqual> m_explored_vertices {};
+        std::unordered_set<BIT_node_ptr_t, NPHash, NPNodeEqual> m_explored_vertices_old {};
+        std::unordered_set<BIT_node_ptr_pair_t, PairNPHash, PairNPEqual> m_explored_edges {};
         std::priority_queue<EdgeCost_t, std::vector<EdgeCost_t>, CompareQueuePairCosts> m_edge_queue {};
         std::priority_queue<VertexCost_t, std::vector<VertexCost_t>, CompareQueuePairCosts> m_vertex_queue {};
-        std::unordered_map<node_ptr_t, float, NPHash, NPNodeEqual> m_cost_to_node_dict {};
+        std::unordered_map<BIT_node_ptr_t, float, NPHash, NPNodeEqual> m_cost_to_node_dict {};
         const float m_search_radius {};
         constexpr int m_max_kdtree_leafs = 10;
         const float m_cMin {};
@@ -42,8 +43,9 @@ class BIT_Planner
         const int m_batch_sample_count {};
         const Eigen::Matrix3f m_C {};
         const Eigen::Vector3f m_ellipse_center {};
+        const bool m_enable_dubins {false};
 
-        std::pair<float, float> calc_dist_and_angle(const Node& start_node, const Node& end_node) const
+        std::pair<float, float> calc_dist_and_angle(const BIT_Node& start_node, const BIT_Node& end_node) const
         {
             float dx {end_node.get_x() - start_node.get_x()};
             float dy {end_node.get_y() - start_node.get_y()};
@@ -51,7 +53,7 @@ class BIT_Planner
         }
 
         // Function to perform rotation to world frame
-        Eigen::Matrix3f RotationToWorldFrame(const Node& x_start, const Node& x_goal, float L) const 
+        Eigen::Matrix3f RotationToWorldFrame(const BIT_Node& x_start, const BIT_Node& x_goal, float L) const 
         {
             Eigen::Vector3f a1((x_goal.get_x() - x_start.get_x()) / L, (x_goal.get_y() - x_start.get_y()) / L, 0.0f);
             Eigen::Vector3f e1(1.0f, 0.0f, 0.0f);
@@ -64,17 +66,17 @@ class BIT_Planner
             return C;
         }
         
-        float g_estimated(const Node& node) const
+        float g_estimated(const BIT_Node& node) const
         {
             return calc_dist_and_angle(m_start, node).first;
         }
 
-        float h_estimated(const Node& node) const
+        float h_estimated(const BIT_Node& node) const
         {
             return calc_dist_and_angle(node, m_goal).first;
         }
 
-        float f_estimated(const Node& node) const 
+        float f_estimated(const BIT_Node& node) const 
         {
             return g_estimated(node) + h_estimated(node);
         }
@@ -107,7 +109,7 @@ class BIT_Planner
                 }
             }
 
-            std::unordered_set<node_ptr_t> temp_vertexs {};
+            std::unordered_set<BIT_node_ptr_t> temp_vertexs {};
             for (auto it = m_explored_vertices.begin(); it != m_explored_vertices.end();) {
                 if (m_cost_to_node_dict[*it] == inf) {
                     temp_vertexs.insert(*it)
@@ -129,12 +131,19 @@ class BIT_Planner
 
         }
 
-        float true_cost(const node_ptr_t& start_n, const node_ptr_t& end_n)
+        float true_cost(const BIT_node_ptr_t& start_n, const BIT_node_ptr_t& end_n)
         {
-            // Need to implement
+            // Need to implement, computes the true cost between two nodes, enable/disable dubins here
+            if (m_enable_dubins)
+            {
+
+            } else 
+            {
+                m_
+            }
         }
 
-        void ExpandVertex(const node_ptr_t& vertex_node, KDTree_t& samples_kdtree, KDTree_t& vertex_kdtree, const std::vector<node_ptr_t>& samples_vec, const std::vector<node_ptr_t>& vertex_vec)
+        void ExpandVertex(const BIT_node_ptr_t& vertex_node, KDTree_t& samples_kdtree, KDTree_t& vertex_kdtree, const std::vector<BIT_node_ptr_t>& samples_vec, const std::vector<BIT_node_ptr_t>& vertex_vec)
         {
             // Remove vertex from vertex priority queue, but if using priority queue vertex should be removed from queue already when retrieved
             
@@ -143,7 +152,7 @@ class BIT_Planner
             std::vector<nanoflann::ResultItem<float, float>> ret_matches_samples;
             const float query_pt[2] = {vertex_node->get_x(),vertex_node->get_y()}
             const size_t nMatches_samples = samples_kdtree.radiusSearch(&query_pt[0], m_search_radius, ret_matches_samples);
-            std::unordered_set<node_ptr_t, NPHash, NPNodeEqual> samples_near;
+            std::unordered_set<BIT_node_ptr_t, NPHash, NPNodeEqual> samples_near;
             for (size_t i = 0; i < nMatches_samples; i++)
             {
                 samples_near.insert(samples_vec[ret_matches_samples[i].first]);
@@ -167,7 +176,7 @@ class BIT_Planner
             if (m_explored_vertices_old.count(vertex_node) == 0)
             {
                 // find vertexes near arg vertex within radius
-                std::unordered_set<node_ptr_t, NPHash, NPNodeEqual> vertexes_near;
+                std::unordered_set<BIT_node_ptr_t, NPHash, NPNodeEqual> vertexes_near;
                 std::vector<nanoflann::ResultItem<float, float>> ret_matches_v;
                 const size_t nMatches_v = vertex_kdtree.radiusSearch(&query_pt[0], m_search_radius, ret_matches_v);
                 for (size_t i = 0; i < nMatches_v; i++)
@@ -178,7 +187,7 @@ class BIT_Planner
                 //Iterate through near vertices
                 for (auto it = vertexes_near.begin(); it != vertexes_near.end();) 
                 {
-                    node_ptr_pair_t edge_pair = std::make_pair(vertex_node,*it);
+                    BIT_node_ptr_pair_t edge_pair = std::make_pair(vertex_node,*it);
                     float edge_cost = calc_dist_and_angle(*vertex_node,**it).first;
 
                     if  ((m_explored_edges.count(edge_pair) == 0) && 
@@ -236,7 +245,7 @@ class BIT_Planner
             }
         }
 
-        node_ptr_t BestInVertexQueue() const
+        BIT_node_ptr_t BestInVertexQueue() const
         {
 
             assert(!m_vertex_queue.empty() && "Error: Vertex Priority Queue should NOT be empty!");
@@ -244,7 +253,7 @@ class BIT_Planner
             
         }
 
-        node_ptr_pair_t BestInEdgeQueue() const
+        BIT_node_ptr_pair_t BestInEdgeQueue() const
         {
             assert(!m_edge_queue.empty() && "Error: Edge Priority Queue should NOT be empty!");
             return m_edge_queue.top().first;
@@ -283,7 +292,7 @@ class BIT_Planner
             {
                 Eigen::Vector3f xBall{SampleUnitNBall()};
                 Eigen::Vector3f random_sample = ((m_C * L) * xBall) + m_ellipse_center;
-                node_ptr_t new_node = std::make_shared<Node>(random_sample[0], random_sample[1]);
+                BIT_node_ptr_t new_node = std::make_shared<BIT_Node>(random_sample[0], random_sample[1]);
                 if (!m_env_map.point_collision(new_node))
                 {
                     m_map_samples.insert(new_node);
@@ -301,7 +310,7 @@ class BIT_Planner
             std::uniform_real_distribution<float> map_y_range(m_env_map.get_yRange().first, m_env_map.get_yRange().second);
             while (sample_count < m_batch_sample_count)
             {
-                node_ptr_t new_node = std::make_shared<Node>(map_x_range(gen), map_y_range(gen));
+                BIT_node_ptr_t new_node = std::make_shared<BIT_Node>(map_x_range(gen), map_y_range(gen));
                 if (!m_env_map.point_collision(new_node))
                 {
                     m_map_samples.insert(new_node);
@@ -322,8 +331,8 @@ class BIT_Planner
         }
 
     public:
-        BIT_Dubins_Planner(Node& start, Node& goal, const std::vector<float>& discrete_headings, Environment_Map& env_map, float search_radius, 
-                            const int max_iters, const float min_turning_radius, const int batch_sample_count)
+        BIT_Dubins_Planner(BIT_Node& start, BIT_Node& goal, const std::vector<float>& discrete_headings, Environment_Map& env_map, float search_radius, 
+                            const int max_iters, const float min_turning_radius, const int batch_sample_count, const bool enable_dubins)
             : m_start {start}
             , m_goal {goal}
             , m_discrete_headings {discrete_headings}
@@ -336,9 +345,10 @@ class BIT_Planner
             , m_batch_sample_count {batch_sample_count}
             , m_C {RotationToWorldFrame(m_start, m_goal, cMin)}
             , m_ellipse_center {Eigen::Vector3f((m_start.get_x() + m_goal.get_x()) / 2.0f, (m_start.get_y() + m_goal.get_y()) / 2.0f, 0.0f)}
+            , m_enable_dubins {enable_dubins}
         {
-            m_shared_start_ptr = std::make_shared<Node>(m_start);
-            m_shared_goal_ptr = std::make_shared<Node>(m_goal);
+            m_shared_start_ptr = std::make_shared<BIT_Node>(m_start);
+            m_shared_goal_ptr = std::make_shared<BIT_Node>(m_goal);
 
             m_map_samples.insert(m_shared_goal_ptr);
             m_explored_vertices.insert(m_shared_start_ptr);
@@ -346,8 +356,12 @@ class BIT_Planner
             m_cost_to_node_dict[m_shared_goal_ptr] = inf;
 
         }
+        std::vector<mapping::Pose2> ExtractPath() 
+        {
+            // Need to be implemented, return the optimal path starting from the goal node following parents backwards
+        }
 
-        std::vector<std::pair> plan()
+        void plan()
         {
             // Main search/planning loop, modify as required during implementation in car
             for (int i=0; i<m_max_iters; i++){
@@ -381,8 +395,8 @@ class BIT_Planner
                 }
 
                 // Before ExpandVertex loop cbuild the kd trees and make a vector c
-                std::vector<node_ptr_t> samples_vec(m_map_samples.begin(), m_map_samples.end());
-                std::vector<node_ptr_t> vertex_vec(m_explored_vertices.begin(), m_explored_vertices.end());
+                std::vector<BIT_node_ptr_t> samples_vec(m_map_samples.begin(), m_map_samples.end());
+                std::vector<BIT_node_ptr_t> vertex_vec(m_explored_vertices.begin(), m_explored_vertices.end());
                 KDTree_t samples_tree = build_samples_kdtree();
                 KDTree_t vertex_tree = build_vertex_kdtree();
 
@@ -391,7 +405,7 @@ class BIT_Planner
                     ExpandVertex(BestInVertexQueue(), samples_tree, vertex_tree, samples_vec, vertex_vec);
                 }
 
-                node_ptr_pair_t best_edge = BestInEdgeQueue();
+                BIT_node_ptr_pair_t best_edge = BestInEdgeQueue();
                 m_edge_queue.pop(); //remove the above edge from the queue
                 float estimated_cost_to_goal = h_estimated(*(best_edge.second);
                 if (m_cost_to_node_dict[best_edge.first] + calc_dist_and_angle(*(best_edge.first), *(best_edge.second)).first + estimated_cost_to_goal) <  m_cost_to_node_dict[m_shared_goal_ptr])
