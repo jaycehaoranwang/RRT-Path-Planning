@@ -387,11 +387,11 @@ class BIT_Planner
 
         void plan()
         {
-        std::vector<std::pair> plan()
-        {   
+
             // Main search/planning loop, modify as required during implementation in car
             auto start = std::chrono::high_resolution_clock::now();
-            for (int i=0; i<m_max_iters; i++){
+            for (int i=0; i<m_max_iters; i++)
+            {
                 bool no_solution = false;
                 if (m_vertex_queue.empty() && m_edge_queue.empty())
                 {
