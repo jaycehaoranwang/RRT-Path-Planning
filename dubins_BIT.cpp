@@ -380,10 +380,6 @@ class BIT_Planner
             m_cost_to_node_dict[m_shared_goal_ptr] = inf;
 
         }
-        std::vector<mapping::Pose2> ExtractPath() 
-        {
-            // Need to be implemented, return the optimal path starting from the goal node following parents backwards
-        }
 
         void plan()
         {
@@ -395,12 +391,6 @@ class BIT_Planner
                 bool no_solution = false;
                 if (m_vertex_queue.empty() && m_edge_queue.empty())
                 {
-                    // If first batch, double the number of sampled points
-                    int points_to_sample = m_batch_sample_count;
-                    if (i==0)
-                    {
-                        points_to_sample = points_to_sample*2;
-                    }
 
                     Prune(m_cost_to_node_dict[m_shared_goal_ptr]);
                     SamplePoints(m_cost_to_node_dict[m_shared_goal_ptr]);
