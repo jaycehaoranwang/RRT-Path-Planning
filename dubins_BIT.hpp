@@ -17,60 +17,13 @@
 
 constexpr float PI = 3.14159265358979323846f;
 
-class Environment_Map
-{
-    private:
-        const std::pair<float,float> m_x_range {};
-        const std::pair<float,float> m_y_range {};
-        std::vector<std::array<float,4>> m_obstacles {};
-
-    public:
-        Environment_Map(const std::pair<float,float> x_range, const std::pair<float,float> y_range)
-            : m_x_range {x_range}, m_y_range {y_range}
-        {
-        }
-
-        void add_obstacles(const std::array<float,4>& obstacle)
-        {
-            m_obstacles.push_back(obstacle);
-        }
-
-        std::vector<std::array<float,4>> get_obstacles() const
-        {
-            return m_obstacles;
-        }
-        
-        std::pair<float,float> get_xRange() const
-        {
-            return m_x_range;
-        }
-
-        std::pair<float,float> get_yRange() const
-        {
-            return m_y_range;
-        }
-
-        bool point_collision(std::shared_ptr<BIT_Node>& node_ptr)
-        {
-            /*
-            Check if a node/point is feasible to exist in the given map, ensure it is within map bounds+clearances, not inside obstacles or within obs clearance bounds
-            */
-        }
-        bool path_collision() const
-        {
-            /*
-            Check if a path collides with any obstacles and their safety bounds/other collision conditions
-            */
-        }
-};
-
 class BIT_Node
 {
     private:
         float x {};
         float y {};
-        float heading {};
-        std::shared_ptr<BIT_Node> parent {};
+        float m_heading {};
+        std::shared_ptr<BIT_Node> m_parent {};
     public:
         
         BIT_Node(float arg_x, float arg_y)
@@ -110,12 +63,12 @@ class BIT_Node
             if (normalized < 0.0f) {
                 normalized += 360.0f;
             }
-            this->heading = normalized;
+            m_heading = normalized;
         }
 
         void set_parent(std::shared_ptr<BIT_Node> parent_pointer)
         {
-            this->parent = parent_pointer;
+            m_parent = parent_pointer;
         }
         // Equality operator
         bool operator==(const BIT_Node& other) const
@@ -125,6 +78,158 @@ class BIT_Node
 
 
 };
+
+class Environment_Map
+{
+    private:
+        const std::pair<float,float> m_x_range {};
+        const std::pair<float,float> m_y_range {};
+        std::vector<std::array<float,4>> m_obstacles {};
+
+    int orientation(std::pair<float, float> a, std::pair<float, float> b, std::pair<float, float> c) const
+    {
+        int val = (b.second - a.second) * (c.first - b.first) - (b.first - a.first) * (c.second - b.second);
+        if (val == 0) return 0;
+        return (val > 0) ? 1 : 2;
+    }
+
+    bool onSegment(std::pair<float, float> a, std::pair<float, float> b, std::pair<float, float> c) const 
+    {
+        if (std::min(a.first, c.first) <= b.first && b.first <= std::max(a.first, c.first) &&
+            std::min(a.second, c.second) <= b.second && b.second <= std::max(a.second, c.second)) 
+        {
+            return true;
+        }
+        return false;
+    }
+
+    bool lineSegmentsIntersection(std::pair<float, float> p1, std::pair<float, float> p2, std::pair<float, float> q1, std::pair<float, float> q2) const
+    {
+        int o1 = orientation(p1, p2, q1);
+        int o2 = orientation(p1, p2, q2);
+        int o3 = orientation(q1, q2, p1);
+        int o4 = orientation(q1, q2, p2);
+
+        if (o1 != o2 && o3 != o4) return true;
+
+        if (o1 == 0 && onSegment(p1, q1, p2)) return true;
+        if (o2 == 0 && onSegment(p1, q2, p2)) return true;
+        if (o3 == 0 && onSegment(q1, p1, q2)) return true;
+        if (o4 == 0 && onSegment(q1, p2, q2)) return true;
+
+        return false;
+    }
+    public:
+        Environment_Map(const std::pair<float,float> x_range, const std::pair<float,float> y_range)
+            : m_x_range {x_range}, m_y_range {y_range}
+        {
+        }
+
+        void add_obstacles(const std::array<float,4>& obstacle)
+        {
+            m_obstacles.push_back(obstacle);
+        }
+
+        std::vector<std::array<float,4>> get_obstacles() const
+        {
+            // Obstacles should be rectangles defined as {x_min, y_min, x_max, y_max}
+            return m_obstacles;
+        }
+        
+        std::pair<float,float> get_xRange() const
+        {
+            return m_x_range;
+        }
+
+        std::pair<float,float> get_yRange() const
+        {
+            return m_y_range;
+        }
+
+        bool point_collision(const std::shared_ptr<Node>& node_ptr) const
+        {
+            /*
+            Check if a node/point is feasible to exist in the given map, ensure it is within map bounds+clearances, not inside obstacles or within obs clearance bounds
+            */
+           const float node_x = node_ptr->get_x();
+           const float node_y = node_ptr->get_y();
+           if (node_x <= m_x_range.first || node_x >= m_x_range.second || node_y <= m_y_range.first || node_y >= m_y_range.second)
+           {
+                return true; // Check if point is out of map bounds
+           }
+
+           for (auto it = m_obstacles.begin(); it != m_obstacles.end(); ++it)
+           {
+                if (node_x >= (*it)[0] && node_x <= (*it)[2] && node_y >= (*it)[1] && node_y <= (*it)[3])
+                {
+                    return true;
+                }
+           }
+
+           return false;
+        }
+        bool path_collision(const std::shared_ptr<Node>& start, const std::shared_ptr<Node>& end) const
+        {
+            /*
+            Check if a path collides with any obstacles and their safety bounds/other collision conditions, assumes straight line paths for now
+            */
+           if (point_collision(start) || point_collision(end))
+           {
+                return true;
+           }
+           for (auto it = m_obstacles.begin(); it != m_obstacles.end(); ++it)
+           {
+                if (std::max(start->get_x(),end->get_x()) < (*it)[0] || std::min(start->get_x(),end->get_x()) > (*it)[2] || 
+                    std::max(start->get_y(),end->get_y()) < (*it)[1] || std::min(start->get_y(),end->get_y()) > (*it)[3])
+                {   
+                    continue; // Bounding Box check
+                }
+
+                if (lineSegmentsIntersection(std::make_pair(start->get_x(),start->get_y()), 
+                                            std::make_pair(end->get_x(),end->get_y()),
+                                            std::make_pair((*it)[0],(*it)[1]), 
+                                            std::make_pair((*it)[0],(*it)[3])))
+                {
+                    return true;
+                }
+                if (lineSegmentsIntersection(std::make_pair(start->get_x(),start->get_y()), 
+                                            std::make_pair(end->get_x(),end->get_y()),
+                                            std::make_pair((*it)[0],(*it)[3]), 
+                                            std::make_pair((*it)[2],(*it)[3])))
+                {
+                    return true;
+                }
+                if (lineSegmentsIntersection(std::make_pair(start->get_x(),start->get_y()), 
+                                            std::make_pair(end->get_x(),end->get_y()),
+                                            std::make_pair((*it)[2],(*it)[3]), 
+                                            std::make_pair((*it)[2],(*it)[1])))
+                {
+                    return true;
+                }
+                if (lineSegmentsIntersection(std::make_pair(start->get_x(),start->get_y()), 
+                                            std::make_pair(end->get_x(),end->get_y()),
+                                            std::make_pair((*it)[2],(*it)[1]), 
+                                            std::make_pair((*it)[0],(*it)[1])))
+                {
+                    return true;
+                }
+                /*
+                if self.line_segments_intersection(segment_start,segment_end, (obs_x_min, obs_y_min), (obs_x_min,obs_y_max)):
+                    return True
+                if self.line_segments_intersection(segment_start,segment_end, (obs_x_min,obs_y_max), (obs_x_max,obs_y_max)):
+                    return True
+                if self.line_segments_intersection(segment_start,segment_end, (obs_x_max,obs_y_max), (obs_x_max,obs_y_min)):
+                    return True
+                if self.line_segments_intersection(segment_start,segment_end, (obs_x_max,obs_y_min), (obs_x_min, obs_y_min)):
+                    return True
+                */
+                
+           }
+
+            return false;
+        }
+};
+
 
 typedef std::shared_ptr<BIT_Node> BIT_node_ptr_t;
 typedef std::pair<BIT_node_ptr_t, BIT_node_ptr_t> BIT_node_ptr_pair_t;
