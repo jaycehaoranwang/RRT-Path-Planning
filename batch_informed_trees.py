@@ -571,8 +571,8 @@ class BITStar:
         plt.pause(5)
 
 def main():
-    x_start = (2,15)  # Starting node
-    x_goal = (45, 15)  # Goal node
+    x_start = (2,15, 0)  # Starting node
+    x_goal = (45, 15, 0)  # Goal node
     
     batch_informed_star = BITStar(x_start, x_goal, map_size=[[0,50],[0,30]], search_radius = 10, iter_max=100000, visualize=True, enable_dubins_paths=False, min_turning_radius=6)
     batch_informed_star.add_obstacles([(10,10),(15,15)])

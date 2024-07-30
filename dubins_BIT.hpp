@@ -23,7 +23,7 @@ class BIT_Node
         float x {};
         float y {};
         float m_heading {};
-        std::shared_ptr<BIT_Node> m_parent {};
+        BIT_Node* m_parent {};
     public:
         
         BIT_Node(float arg_x, float arg_y)
@@ -44,7 +44,7 @@ class BIT_Node
             return m_heading;
         }
 
-        std::shared_ptr<BIT_Node> get_parent() const 
+        BIT_Node* get_parent() const 
         {
             return m_parent;
         }
@@ -66,14 +66,14 @@ class BIT_Node
             m_heading = normalized;
         }
 
-        void set_parent(std::shared_ptr<BIT_Node> parent_pointer)
+        void set_parent(BIT_Node* parent_pointer)
         {
             m_parent = parent_pointer;
         }
         // Equality operator
         bool operator==(const BIT_Node& other) const
         {
-            return x == other.x && y == other.y && m_heading == other.m_heading && m_parent == other.m_parent;
+            return x == other.x && y == other.y && m_heading == other.m_heading;
         }
 
 
@@ -146,7 +146,7 @@ class Environment_Map
             return m_y_range;
         }
 
-        bool point_collision(const std::shared_ptr<BIT_Node>& node_ptr) const
+        bool point_collision(const BIT_Node* node_ptr) const
         {
             /*
             Check if a node/point is feasible to exist in the given map, ensure it is within map bounds+clearances, not inside obstacles or within obs clearance bounds
@@ -168,7 +168,7 @@ class Environment_Map
 
            return false;
         }
-        bool path_collision(const std::shared_ptr<BIT_Node>& start, const std::shared_ptr<BIT_Node>& end) const
+        bool path_collision(const BIT_Node* start, const BIT_Node* end) const
         {
             /*
             Check if a path collides with any obstacles and their safety bounds/other collision conditions, assumes straight line paths for now
@@ -232,48 +232,40 @@ class Environment_Map
 
 
 typedef std::shared_ptr<BIT_Node> BIT_node_ptr_t;
-typedef std::pair<BIT_node_ptr_t, BIT_node_ptr_t> BIT_node_ptr_pair_t;
-typedef std::pair<BIT_node_ptr_pair_t,float> EdgeCost_t;
-typedef std::pair<BIT_node_ptr_t,float> VertexCost_t;
+typedef std::pair<BIT_Node*, BIT_Node*> BIT_node_pair_t;
 constexpr float inf = std::numeric_limits<float>::infinity();
 
 
 
 // Custom hash function for BIT_Node pointer objects
 struct NPHash {
-    std::size_t operator()(const BIT_node_ptr_t& np) const
+    std::size_t operator()(const BIT_Node* np) const
     {
         // Use std::hash for each member
         size_t h1 = std::hash<float>()(np->get_x());
         size_t h2 = std::hash<float>()(np->get_y());
         size_t h3 = std::hash<float>()(np->get_heading());
-        size_t h4 = np->get_parent() ? std::hash<float>()(np->get_parent()->get_x()) : 0;
+
         
         // Combine the hash values using prime numbers
-        return h1 ^ (h2 * 2) ^ (h3 * 3) ^ (h4 * 11); // Prime number multipliers
+        return h1 ^ (h2 * 2) ^ (h3 * 3); // Prime number multipliers
     }
 };
 
-// Custom equality functor for std::shared_ptr<BIT_Node>
-struct NPNodeEqual {
-    bool operator()(const BIT_node_ptr_t& lhs, const BIT_node_ptr_t& rhs) const {
-        // Check if the pointed-to objects are equal
-        return *lhs == *rhs;
-    }
-};
+
 
 // Custom comparison functor for the priority queue
-struct CompareQueuePairCosts {
-    template<typename T>
-    bool operator()(const std::pair<T, float>& lhs, const std::pair<T, float>& rhs) const {
-        // Compare based on the float value
-        return lhs.second > rhs.second; // Change to < for min heap
-    }
-};
+// struct CompareQueuePairCosts {
+//     template<typename T>
+//     bool operator()(const std::pair<T, float>& lhs, const std::pair<T, float>& rhs) const {
+//         // Compare based on the float value
+//         return lhs.second > rhs.second; // Change to < for min heap
+//     }
+// };
 
 // Define a custom hash function for std::pair<node_ptr, node_ptr>
 struct PairNPHash {
-    std::size_t operator()(const BIT_node_ptr_pair_t& p) const {
+    std::size_t operator()(const BIT_node_pair_t& p) const {
         std::size_t h1 = NPHash()(p.first);
         std::size_t h2 = NPHash()(p.second);
         return h1 ^ (h2 << 1); // Combine the two hash values
@@ -282,15 +274,15 @@ struct PairNPHash {
 
 // Define a custom equality function for std::pair<node_ptr, node_ptr>, check pointed to nodes are equal
 struct PairNPEqual {
-    bool operator()(const BIT_node_ptr_pair_t& p1, const BIT_node_ptr_pair_t& p2) const {
-        return (*(p1.first) == *(p2.first)) && (*(p1.second) == *(p2.second));
+    bool operator()(const BIT_node_pair_t& p1, const BIT_node_pair_t& p2) const {
+        return (p1.first == p2.first) && (p1.second == p2.second);
     }
 };
 
 // nanoflann KD-tree adapter for BIT_Node
 struct NodeKDTreeAdapter
 {
-    std::unordered_set<BIT_node_ptr_t, NPHash, NPNodeEqual> nodes; // Vector of shared_ptr<BIT_Node>
+    std::unordered_set<BIT_Node*, NPHash> nodes; // Vector of shared_ptr<BIT_Node>
 
     // Nanoflann requires a method to return the number of data points
     inline size_t kdtree_get_point_count() const { return nodes.size(); }
