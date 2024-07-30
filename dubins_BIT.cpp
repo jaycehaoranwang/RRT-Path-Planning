@@ -183,6 +183,8 @@ class BIT_Planner
                     std::pair<std::vector<std::pair<float, float>>,float> solution_result {extract_best_path()};
                     std::cout << "Batch Complete, Path Found With Cost: " << solution_result.second <<std::endl;
                     std::cout << "Batch Done Time from Start/Last Solution (s): " << elapsed.count() << std::endl;
+                    std::cout << "Size of Sample Set: " << m_map_samples.size() << std::endl;
+                    std::cout << "Size of Explored Vertices: " << m_explored_vertices.size() << std::endl;
                     auto start = std::chrono::high_resolution_clock::now();
                 }
             }
@@ -527,9 +529,11 @@ class BIT_Planner
 int main()
 {   
     /*
-    BIT_Dubins_Planner(Node& start, Node& goal, const std::vector<float>& discrete_headings, Environment_Map& env_map, float search_radius, 
-                            const int max_iters, const float min_turning_radius, const int batch_sample_count)
-                            */
+    Testing setup for runtime/correctness.
+    Optimal solution has a cost of 43, anything 43-48 is near optimal
+
+    Search radius parameter is in units of SQUARED euclidean distance (to meet KD tree implementation requirements)
+    */
     std::vector<float> dubins_headings = {0.0f};
     std::array<float,4> obs_one = {10.0f, 10.0f, 15.0f, 15.0f};
     std::array<float,4> obs_two = {20.0f, 20.0f, 25.0f, 25.0f};
@@ -541,9 +545,9 @@ int main()
     BIT_Node start_node(2.0f, 15.0f);
     BIT_Node goal_node(45.0f, 15.0f);
     float search_r = 100.0f;
-    const int max_iters = 10000;
+    const int max_iters = 3000;
     const float min_turning_radius = 0.0f;
-    const int batch_sample_count = 100;
+    const int batch_sample_count = 25;
     BIT_Planner bit_planner(start_node, goal_node, dubins_headings, map, search_r, max_iters, min_turning_radius, batch_sample_count);
     bit_planner.plan();
     return 0;
