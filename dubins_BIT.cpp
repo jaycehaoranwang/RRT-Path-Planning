@@ -22,7 +22,7 @@
 class BIT_Planner
 {
     public:
-        BIT_Planner(BIT_Node& start, BIT_Node& goal, const std::vector<float>& discrete_headings, Environment_Map& env_map, float search_radius, const int max_iters, const float min_turning_radius, const int batch_sample_count)
+        BIT_Planner(BIT_Node& start, BIT_Node& goal, const std::vector<float>& discrete_headings, Environment_Map& env_map, float search_radius, const int max_iters, const float min_turning_radius, const int batch_sample_count, const size_t max_kdtree_leafs)
             : m_start {start}
             , m_goal {goal}
             , m_shared_start_ptr {&m_start}
@@ -31,6 +31,7 @@ class BIT_Planner
             , m_env_map {env_map}
             , m_min_turning_radius {min_turning_radius}        
             , m_search_radius {search_radius}
+            , m_max_kdtree_leafs {max_kdtree_leafs}
             , m_cMin {calc_dist_and_angle(m_start, m_goal).first}
             , m_theta {calc_dist_and_angle(m_start, m_goal).second}
             , m_max_iters {max_iters}
@@ -211,7 +212,7 @@ class BIT_Planner
         std::unordered_map<BIT_Node*, float, NPHash> m_cost_to_node_dict {};
         bool m_solution_existence {false};
         const float m_search_radius {};
-        const size_t m_max_kdtree_leafs = 10;
+        const size_t m_max_kdtree_leafs {};
         const float m_cMin {};
         const float m_theta {};
         const float m_min_turning_radius {};
@@ -545,10 +546,11 @@ int main()
     BIT_Node start_node(2.0f, 15.0f);
     BIT_Node goal_node(45.0f, 15.0f);
     float search_r = 100.0f;
-    const int max_iters = 3000;
+    const int max_iters = 500;
     const float min_turning_radius = 0.0f;
-    const int batch_sample_count = 25;
-    BIT_Planner bit_planner(start_node, goal_node, dubins_headings, map, search_r, max_iters, min_turning_radius, batch_sample_count);
+    const int batch_sample_count = 100;
+    const size_t max_kdtree_leaves = 10;
+    BIT_Planner bit_planner(start_node, goal_node, dubins_headings, map, search_r, max_iters, min_turning_radius, batch_sample_count, max_kdtree_leaves);
     bit_planner.plan();
     return 0;
 };
